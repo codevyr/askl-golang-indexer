@@ -1,0 +1,4 @@
+/gomod2nix-template
+.envrc
+.direnv
+askl-golang-indexer
