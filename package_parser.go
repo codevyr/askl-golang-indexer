@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"log"
+	"strings"
 	"sync"
 
 	"golang.org/x/tools/go/packages"
@@ -72,7 +73,39 @@ func NewFileParser(filepath string, ast *ast.File) *FileParser {
 func (f *FileParser) Parse(parser *Parser) error {
 	fmt.Println("GoFiles:", f.filepath)
 
+	ast.Inspect(f.ast, func(n ast.Node) bool {
+		// Check if the node is a function declaration
+		if fn, ok := n.(*ast.FuncDecl); ok {
+			recv := make([]string, 0)
+			if fn.Recv != nil {
+				f := fn.Recv.List[0]
+				if f.Names != nil {
+					n := f.Names[0]
+					recv = append(recv, n.Name)
+					recv = append(recv, getReceiverType(f.Type))
+				}
+			}
+			fmt.Println(" -", strings.Join(recv, " "), fn.Name.Name, f.filepath)
+		}
+		return true
+	})
+
 	return nil
+}
+
+// getReceiverType extracts and formats the receiver type
+func getReceiverType(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.Ident: // Example: func (p Person) Method() {}
+		return t.Name
+	case *ast.StarExpr: // Example: func (p *Person) Method() {}
+		return "*" + getReceiverType(t.X)
+	case *ast.IndexExpr: // Generic type (Go 1.18+), Example: func (p MyStruct[T]) Method() {}
+		return getReceiverType(t.X) + "[...]"
+	case *ast.IndexListExpr: // Generic type (multiple parameters)
+		return getReceiverType(t.X) + "[...]"
+	}
+	return "unknown"
 }
 
 func (p *FileParser) GetId() (string, bool) {
