@@ -1,7 +1,7 @@
 package main
 
 import (
-	"flag"
+	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -11,22 +11,24 @@ import (
 	"path"
 	"strings"
 
+	"github.com/urfave/cli/v3"
 	"golang.org/x/mod/modfile"
+	"golang.org/x/tools/go/packages"
 )
 
-func getModulePath(packagePath string) (string, error) {
+func getModulePath(packagePath string) (*modfile.File, error) {
 	goModPath := path.Join(packagePath, "go.mod")
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
-		return "", fmt.Errorf("could not read go.mod file: %v", err)
+		return nil, fmt.Errorf("could not read go.mod file: %v", err)
 	}
 
 	modFile, err := modfile.Parse("go.mod", data, nil)
 	if err != nil {
-		return "", fmt.Errorf("could not parse go.mod file: %v", err)
+		return nil, fmt.Errorf("could not parse go.mod file: %v", err)
 	}
 
-	return modFile.Module.Mod.Path, nil
+	return modFile, nil
 }
 
 type File struct {
@@ -106,29 +108,128 @@ func parseDirectory(modulePath, module, submodule string, visitedModules map[str
 	return files, nil
 }
 
+type ModuleType int
+
+const (
+	ModuleRoot ModuleType = iota
+	ModuleDependency
+)
+
+func parseModule(flags Flags, packageType ModuleType) error {
+	module, err := getModulePath(flags.packagePath)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("%v", module.Module.Mod.Path)
+	modulePath := module.Module.Mod.Path
+
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.LoadImports,
+		Dir:  flags.packagePath,
+		// Dir, Env, or other settings can be specified if needed
+	}
+
+	pkgs, err := packages.Load(cfg, modulePath)
+	if err != nil {
+		return fmt.Errorf("failed to load a package: %w", err)
+	}
+
+	packageParser := NewPackageParser()
+	defer packageParser.Close()
+
+	// pkgs now contains package metadata, ASTs, type info, etc.
+	for _, p := range pkgs {
+		err := packageParser.Parse(p)
+		if err != nil {
+			return err
+		}
+	}
+
+	// // Requirements
+	// for _, r := range module.Require {
+	// 	fmt.Printf("Require: %s@%s (Indirect=%v)\n", r.Mod.Path, r.Mod.Version, r.Indirect)
+	// }
+
+	// if packageType == ModuleRoot {
+	// 	// Replacements
+	// 	for _, rep := range module.Replace {
+	// 		oldPath := rep.Old.Path
+	// 		oldVer := rep.Old.Version
+	// 		newPath := rep.New.Path
+	// 		newVer := rep.New.Version
+	// 		fmt.Printf("Replace: %s@%s => %s@%s\n", oldPath, oldVer, newPath, newVer)
+	// 		panic("Unimplemented")
+	// 	}
+
+	// 	// We ignore excludes, because they only impact modules that use this module
+	// }
+
+	packageParser.Wait()
+
+	return nil
+}
+
+func parseFile(pkg *packages.Package, file string) error {
+	fmt.Println("GoFiles:", file)
+
+	return nil
+}
+
+type Flags struct {
+	packagePath string
+	packageName string
+}
+
 func main() {
-	packagePath := flag.String("path", ".", "Path to the Go package")
-	flag.Parse()
+	var flags Flags
 
-	module, err := getModulePath(*packagePath)
-	if err != nil {
-		log.Fatalf("Could not get the module path: %v", err)
+	cmd := &cli.Command{
+		Name:  "askl-golang-indexer",
+		Usage: "Create askl index for a Go package",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "path",
+				Value:       ".",
+				Usage:       "`PATH` to the Go package",
+				Destination: &flags.packagePath,
+			},
+			&cli.StringFlag{
+				Name:        "package",
+				Value:       "main",
+				Usage:       "What package `NAME` to parse",
+				Destination: &flags.packageName,
+			},
+		},
+		Action: func(context.Context, *cli.Command) error {
+			err := parseModule(flags, ModuleRoot)
+			if err != nil {
+				log.Fatalf("Could not get the module path: %v", err)
+			}
+
+			module := ""
+			visitedModules := make(map[string]bool)
+			files, err := parseDirectory(flags.packagePath, module, "", visitedModules)
+			if err != nil {
+				log.Fatalf("failed to parse directory: %v", err)
+			}
+
+			count := 0
+			fm := make(map[string]int)
+			for _, f := range files {
+				fm[f.Name] = fm[f.Name] + 1
+				count = count + 1
+				fmt.Println(f.Name)
+			}
+			// Output results
+			fmt.Printf("Analysis complete\n")
+			fmt.Println(count)
+			return nil
+		},
 	}
 
-	visitedModules := make(map[string]bool)
-	files, err := parseDirectory(*packagePath, module, "", visitedModules)
-	if err != nil {
-		log.Fatalf("failed to parse directory: %v", err)
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
+		log.Fatal(err)
 	}
 
-	count := 0
-	fm := make(map[string]int)
-	for _, f := range files {
-		fm[f.Name] = fm[f.Name] + 1
-		count = count + 1
-		fmt.Println(f.Name)
-	}
-	// Output results
-	fmt.Printf("Analysis complete\n")
-	fmt.Println(count)
 }
