@@ -125,7 +125,7 @@ func parseModule(flags Flags, packageType ModuleType) error {
 	modulePath := module.Module.Mod.Path
 
 	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.LoadImports,
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.LoadImports | packages.LoadAllSyntax,
 		Dir:  flags.packagePath,
 		// Dir, Env, or other settings can be specified if needed
 	}
@@ -135,12 +135,12 @@ func parseModule(flags Flags, packageType ModuleType) error {
 		return fmt.Errorf("failed to load a package: %w", err)
 	}
 
-	packageParser := NewPackageParser()
-	defer packageParser.Close()
+	parser := NewParser()
+	defer parser.Close()
 
 	// pkgs now contains package metadata, ASTs, type info, etc.
 	for _, p := range pkgs {
-		err := packageParser.Parse(p)
+		err := parser.Parse(NewPackageParser(p))
 		if err != nil {
 			return err
 		}
@@ -165,13 +165,7 @@ func parseModule(flags Flags, packageType ModuleType) error {
 	// 	// We ignore excludes, because they only impact modules that use this module
 	// }
 
-	packageParser.Wait()
-
-	return nil
-}
-
-func parseFile(pkg *packages.Package, file string) error {
-	fmt.Println("GoFiles:", file)
+	parser.Wait()
 
 	return nil
 }
