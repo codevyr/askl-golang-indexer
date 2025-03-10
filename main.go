@@ -58,7 +58,10 @@ func parseDirectory(modulePath, module, submodule string, visitedModules map[str
 	importPath := path.Join(modulePath, submodule)
 
 	fset := token.NewFileSet() // positions are relative to fset
-	pkgs, err := parser.ParseDir(fset, importPath, nil, parser.ParseComments)
+	pkgs, err := parser.ParseDir(
+		fset, importPath, nil,
+		parser.ParseComments|parser.SkipObjectResolution,
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
