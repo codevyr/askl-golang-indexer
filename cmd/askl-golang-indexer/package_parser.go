@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"go/ast"
 	"log"
-	"strings"
 	"sync"
+	"unicode"
 
+	"github.com/planetA/askl-golang-indexer/pkg/index"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -16,14 +17,16 @@ type Parsable interface {
 }
 
 type PackageParser struct {
-	pkg *packages.Package
+	pkg   *packages.Package
+	index *index.Index
 }
 
 var _ Parsable = &PackageParser{}
 
-func NewPackageParser(pkg *packages.Package) *PackageParser {
+func NewPackageParser(pkg *packages.Package, index *index.Index) *PackageParser {
 	return &PackageParser{
-		pkg: pkg,
+		pkg:   pkg,
+		index: index,
 	}
 }
 
@@ -36,14 +39,18 @@ func (p *PackageParser) Parse(parser *Parser) error {
 	}
 
 	for i, file := range p.pkg.CompiledGoFiles {
-		err := parser.Parse(NewFileParser(p.pkg, file, p.pkg.Syntax[i]))
+		fileParser, err := NewFileParser(p.pkg, file, p.pkg.Syntax[i], p.index)
 		if err != nil {
+			return err
+		}
+
+		if err := parser.Parse(fileParser); err != nil {
 			return err
 		}
 	}
 
 	for _, importedPkg := range p.pkg.Imports {
-		err := parser.Parse(NewPackageParser(importedPkg))
+		err := parser.Parse(NewPackageParser(importedPkg, p.index))
 		if err != nil {
 			return err
 		}
@@ -58,78 +65,108 @@ func (p *PackageParser) GetId() (string, bool) {
 
 type FileParser struct {
 	filepath string
+	fileId   index.FileId
 	ast      *ast.File
 	pkg      *packages.Package
+	index    *index.Index
 }
 
 var _ Parsable = &FileParser{}
 
-func NewFileParser(pkg *packages.Package, filepath string, ast *ast.File) *FileParser {
+func NewFileParser(pkg *packages.Package, filepath string, ast *ast.File, index *index.Index) (*FileParser, error) {
+	fileId, err := index.AddFile(filepath)
+	if err != nil {
+		return nil, err
+	}
+
 	return &FileParser{
 		filepath: filepath,
 		ast:      ast,
 		pkg:      pkg,
-	}
+		index:    index,
+		fileId:   fileId,
+	}, nil
 }
 
 // Find function calls in a given FuncDecl
-func (f *FileParser) callExprParser(fn *ast.FuncDecl) []string {
-	var calls []string
-
+func (f *FileParser) callExprParser(fn *ast.FuncDecl, declId index.DeclarationId) {
 	if fn.Body == nil {
-		return []string{}
+		return
 	}
 
 	// Traverse the function body
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
+		if callExpr, ok := n.(*ast.CallExpr); ok {
+			start := f.pkg.Fset.Position(n.Pos())
+			end := f.pkg.Fset.Position(n.End())
+
 			// Check if the function call has an identifier (direct function call)
-			if ident, ok := call.Fun.(*ast.Ident); ok {
-				var call string
+			var call string
+			if ident, ok := callExpr.Fun.(*ast.Ident); ok {
 				if obj, ok := f.pkg.TypesInfo.Uses[ident]; ok {
 					pos := f.pkg.Fset.Position(obj.Pos())
 					call = fmt.Sprintf("%s:%v:%s", obj.Pkg(), pos, ident.Name)
 				} else {
 					call = ident.Name
 				}
-				calls = append(calls, call)
-			} else if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+			} else if sel, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
 				// Method call or package-qualified function call
-				var call string
 				if obj, ok := f.pkg.TypesInfo.Uses[sel.Sel]; ok {
 					pos := f.pkg.Fset.Position(obj.Pos())
 					call = fmt.Sprintf("%s:%v:%s.%s", obj.Pkg(), pos, sel.X, sel.Sel.Name)
 				} else {
 					call = fmt.Sprintf("%s.%s", sel.X, sel.Sel.Name)
 				}
-				calls = append(calls, call)
 			}
+			f.index.AddReference(declId, call, start, end)
 		}
 		return true
 	})
-	return calls
+}
+
+func GetSymbolScope(name string) index.SymbolScope {
+	var first rune
+	for _, c := range name {
+		first = c
+		break
+	}
+
+	if unicode.IsUpper(first) && unicode.IsLetter(first) {
+		return index.ScopeGlobal
+	}
+	return index.ScopeLocal
 }
 
 func (f *FileParser) funcDeclParser(n ast.Node) bool {
 	// Check if the node is a function declaration
 	if fn, ok := n.(*ast.FuncDecl); ok {
-		recv := make([]string, 0)
+		var fullName string
 		if fn.Recv != nil {
 			f := fn.Recv.List[0]
 			if f.Names != nil {
-				n := f.Names[0]
-				recv = append(recv, n.Name)
-				recv = append(recv, getReceiverType(f.Type))
+				fullName = fmt.Sprintf("%s.%s", getReceiverType(f.Type), fn.Name.Name)
 			}
+		} else {
+			fullName = fn.Name.Name
 		}
-		calls := f.callExprParser(fn)
-		fmt.Println(" -", strings.Join(recv, " "), fn.Name.Name, f.filepath, strings.Join(calls, " "))
+
+		symbolScope := GetSymbolScope(fn.Name.Name)
+
+		start := f.pkg.Fset.Position(n.Pos())
+		end := f.pkg.Fset.Position(n.End())
+
+		_, declId, err := f.index.AddSymbol(f.fileId, fullName, symbolScope, start, end)
+		if err != nil {
+			log.Fatalf("Failed to add symbol: %s", err)
+		}
+
+		f.callExprParser(fn, declId)
 	}
 	return true
 }
 
 func (f *FileParser) Parse(parser *Parser) error {
-	fmt.Println("GoFiles:", f.filepath)
+
 	ast.Inspect(f.ast, func(n ast.Node) bool {
 		return f.funcDeclParser(n)
 	})

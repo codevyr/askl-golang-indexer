@@ -14,6 +14,8 @@ import (
 	"github.com/urfave/cli/v3"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/tools/go/packages"
+
+	"github.com/planetA/askl-golang-indexer/pkg/index"
 )
 
 func getModulePath(packagePath string) (*modfile.File, error) {
@@ -119,6 +121,15 @@ const (
 )
 
 func parseModule(flags Flags, packageType ModuleType) error {
+	index, err := index.NewIndex(
+		index.WithIndexPath(flags.indexPath),
+		index.WithRecreate(true),
+	)
+	if err != nil {
+		return err
+	}
+	defer index.Close()
+
 	module, err := getModulePath(flags.packagePath)
 	if err != nil {
 		return err
@@ -143,7 +154,7 @@ func parseModule(flags Flags, packageType ModuleType) error {
 
 	// pkgs now contains package metadata, ASTs, type info, etc.
 	for _, p := range pkgs {
-		err := parser.Parse(NewPackageParser(p))
+		err := parser.Parse(NewPackageParser(p, index))
 		if err != nil {
 			return err
 		}
@@ -176,6 +187,7 @@ func parseModule(flags Flags, packageType ModuleType) error {
 type Flags struct {
 	packagePath string
 	packageName string
+	indexPath   string
 }
 
 func main() {
@@ -190,6 +202,12 @@ func main() {
 				Value:       ".",
 				Usage:       "`PATH` to the Go package",
 				Destination: &flags.packagePath,
+			},
+			&cli.StringFlag{
+				Name:        "index",
+				Value:       "index.db",
+				Usage:       "`INDEX` where to store the resulting index",
+				Destination: &flags.indexPath,
 			},
 			&cli.StringFlag{
 				Name:        "package",
