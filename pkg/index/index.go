@@ -10,7 +10,12 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+const (
+	goFileType = "go"
+)
+
 type Config struct {
+	project   string
 	indexPath string
 	recreate  bool
 }
@@ -21,11 +26,18 @@ type Option interface {
 
 type indexPathOption struct {
 	indexPath string
+	project   string
 }
 
 func WithIndexPath(indexPath string) Option {
 	return &indexPathOption{
 		indexPath: indexPath,
+	}
+}
+
+func WithProject(project string) Option {
+	return &indexPathOption{
+		project: project,
 	}
 }
 
@@ -48,10 +60,10 @@ func (o *recreateOption) apply(config *Config) {
 }
 
 type IndexItem interface {
-	handle() error
+	handle(index *Index) error
 }
 
-type FileId int
+type FileId int64
 
 type FileResp struct {
 	fileId FileId
@@ -59,17 +71,53 @@ type FileResp struct {
 }
 
 type File struct {
-	path string
-	resp chan FileResp
+	pkgDir string
+	path   string
+	resp   chan FileResp
 }
 
 var _ IndexItem = &File{}
 
-func (i *File) handle() error {
-	fmt.Println("GoFiles:", i.path)
+//go:embed sql/select_file.sql
+var selectFileSQL string
 
-	i.resp <- FileResp{
-		fileId: 1,
+//go:embed sql/insert_file.sql
+var insertFileSQL string
+
+func (f *File) handle(index *Index) error {
+	fmt.Println("GoFiles:", f.path)
+
+	row := index.db.QueryRow(selectFileSQL, f.path, index.project)
+
+	fileResp := FileResp{}
+	var err error
+	if err = row.Scan(&fileResp.fileId); err == nil {
+		f.resp <- fileResp
+		return err
+	} else if err == sql.ErrNoRows {
+		// We exit the if condition to to insert the row.
+	} else {
+		fileResp.err = err
+		f.resp <- fileResp
+		return err
+	}
+
+	res, err := index.db.Exec(insertFileSQL, index.project, f.pkgDir, f.path, goFileType)
+	if err != nil {
+		fileResp.err = err
+		f.resp <- fileResp
+		return err
+	}
+
+	var fileId int64
+	if fileId, err = res.LastInsertId(); err != nil {
+		fileResp.err = err
+		f.resp <- fileResp
+		return err
+	}
+
+	f.resp <- FileResp{
+		fileId: FileId(fileId),
 		err:    nil,
 	}
 	return nil
@@ -131,7 +179,7 @@ type Symbol struct {
 
 var _ IndexItem = &Symbol{}
 
-func (i *Symbol) handle() error {
+func (i *Symbol) handle(index *Index) error {
 	fmt.Println("  Symbol:", i.fileId, i.name, i.scope, i.start, i.end)
 
 	i.resp <- SymbolResp{
@@ -151,13 +199,14 @@ type Reference struct {
 
 var _ IndexItem = &Reference{}
 
-func (i *Reference) handle() error {
+func (i *Reference) handle(index *Index) error {
 	fmt.Println("  Reference:", i.from, i.to, i.start, i.end)
 
 	return nil
 }
 
 type Index struct {
+	project string
 	db      *sql.DB
 	channel chan IndexItem
 	wg      sync.WaitGroup
@@ -185,6 +234,7 @@ func NewIndex(options ...Option) (*Index, error) {
 	}
 
 	index := &Index{
+		project: config.project,
 		db:      db,
 		channel: make(chan IndexItem),
 	}
@@ -194,13 +244,14 @@ func NewIndex(options ...Option) (*Index, error) {
 	return index, nil
 }
 
-func (i *Index) AddFile(path string) (FileId, error) {
+func (i *Index) AddFile(pkgDir, path string) (FileId, error) {
 	i.wg.Add(1)
 
 	respChan := make(chan FileResp)
 	i.channel <- &File{
-		path: path,
-		resp: respChan,
+		pkgDir: pkgDir,
+		path:   path,
+		resp:   respChan,
 	}
 	resp := <-respChan
 
@@ -239,7 +290,7 @@ func (i *Index) AddReference(from DeclarationId, to string, start token.Position
 
 func (i *Index) loop() {
 	for message := range i.channel {
-		message.handle()
+		message.handle(i)
 		i.wg.Done()
 	}
 }
