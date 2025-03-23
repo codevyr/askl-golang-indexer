@@ -60,20 +60,61 @@ func (o *recreateOption) apply(config *Config) {
 }
 
 type IndexItem interface {
-	handle(index *Index) error
+	handle(index *Index) (interface{}, error)
+	respChan() chan IndexItemResp
+}
+
+func Handle(item IndexItem, index *Index) {
+	resp, err := item.handle(index)
+	respChan := item.respChan()
+	if respChan != nil {
+		respChan <- IndexItemResp{
+			val: resp,
+			err: err,
+		}
+	}
+}
+
+type IndexItemResp struct {
+	val interface{}
+	err error
+}
+
+type IndexItemWithResp struct {
+	resp chan IndexItemResp
+}
+
+func NewIndexItemWithResp() IndexItemWithResp {
+	return IndexItemWithResp{
+		resp: make(chan IndexItemResp),
+	}
+}
+
+func (i *IndexItemWithResp) respChan() chan IndexItemResp {
+	return i.resp
+}
+
+type IndexItemNoResp struct {
+}
+
+func NewIndexItemNoResp() IndexItemNoResp {
+	return IndexItemNoResp{}
+}
+
+func (i *IndexItemNoResp) respChan() chan IndexItemResp {
+	return nil
 }
 
 type FileId int64
 
 type FileResp struct {
 	fileId FileId
-	err    error
 }
 
 type File struct {
+	IndexItemWithResp
 	pkgDir string
 	path   string
-	resp   chan FileResp
 }
 
 var _ IndexItem = &File{}
@@ -84,7 +125,7 @@ var selectFileSQL string
 //go:embed sql/insert_file.sql
 var insertFileSQL string
 
-func (f *File) handle(index *Index) error {
+func (f *File) handle(index *Index) (interface{}, error) {
 	fmt.Println("GoFiles:", f.path)
 
 	row := index.db.QueryRow(selectFileSQL, f.path, index.project)
@@ -92,35 +133,26 @@ func (f *File) handle(index *Index) error {
 	fileResp := FileResp{}
 	var err error
 	if err = row.Scan(&fileResp.fileId); err == nil {
-		f.resp <- fileResp
-		return err
+		return fileResp, nil
 	} else if err == sql.ErrNoRows {
 		// We exit the if condition to to insert the row.
 	} else {
-		fileResp.err = err
-		f.resp <- fileResp
-		return err
+		return nil, err
 	}
 
 	res, err := index.db.Exec(insertFileSQL, index.project, f.pkgDir, f.path, goFileType)
 	if err != nil {
-		fileResp.err = err
-		f.resp <- fileResp
-		return err
+		return nil, err
 	}
 
 	var fileId int64
 	if fileId, err = res.LastInsertId(); err != nil {
-		fileResp.err = err
-		f.resp <- fileResp
-		return err
+		return nil, err
 	}
 
-	f.resp <- FileResp{
+	return FileResp{
 		fileId: FileId(fileId),
-		err:    nil,
-	}
-	return nil
+	}, nil
 }
 
 type SymbolScope int
@@ -165,32 +197,30 @@ type DeclarationId int
 type SymbolResp struct {
 	symbolId      SymbolId
 	declarationId DeclarationId
-	err           error
 }
 
 type Symbol struct {
+	IndexItemWithResp
 	fileId FileId
 	name   string
 	scope  SymbolScope
 	start  token.Position
 	end    token.Position
-	resp   chan SymbolResp
 }
 
 var _ IndexItem = &Symbol{}
 
-func (i *Symbol) handle(index *Index) error {
+func (i *Symbol) handle(index *Index) (interface{}, error) {
 	fmt.Println("  Symbol:", i.fileId, i.name, i.scope, i.start, i.end)
 
-	i.resp <- SymbolResp{
+	return SymbolResp{
 		symbolId:      1,
 		declarationId: 1,
-		err:           nil,
-	}
-	return nil
+	}, nil
 }
 
 type Reference struct {
+	IndexItemNoResp
 	from  DeclarationId
 	to    SymbolId
 	start token.Position
@@ -199,10 +229,10 @@ type Reference struct {
 
 var _ IndexItem = &Reference{}
 
-func (i *Reference) handle(index *Index) error {
+func (i *Reference) handle(index *Index) (interface{}, error) {
 	fmt.Println("  Reference:", i.from, i.to, i.start, i.end)
 
-	return nil
+	return nil, nil
 }
 
 type Index struct {
@@ -247,32 +277,34 @@ func NewIndex(options ...Option) (*Index, error) {
 func (i *Index) AddFile(pkgDir, path string) (FileId, error) {
 	i.wg.Add(1)
 
-	respChan := make(chan FileResp)
-	i.channel <- &File{
-		pkgDir: pkgDir,
-		path:   path,
-		resp:   respChan,
+	f := &File{
+		IndexItemWithResp: NewIndexItemWithResp(),
+		pkgDir:            pkgDir,
+		path:              path,
 	}
-	resp := <-respChan
+	i.channel <- f
+	resp := <-f.respChan()
+	fileResp := resp.val.(FileResp)
 
-	return resp.fileId, resp.err
+	return fileResp.fileId, resp.err
 }
 
 func (i *Index) AddSymbol(fileId FileId, name string, scope SymbolScope, start token.Position, end token.Position) (SymbolId, DeclarationId, error) {
 	i.wg.Add(1)
 
-	respChan := make(chan SymbolResp)
-	i.channel <- &Symbol{
-		fileId: fileId,
-		name:   name,
-		scope:  scope,
-		start:  start,
-		end:    end,
-		resp:   respChan,
+	s := &Symbol{
+		IndexItemWithResp: NewIndexItemWithResp(),
+		fileId:            fileId,
+		name:              name,
+		scope:             scope,
+		start:             start,
+		end:               end,
 	}
-	resp := <-respChan
+	i.channel <- s
+	resp := <-s.respChan()
+	symResp := resp.val.(SymbolResp)
 
-	return resp.symbolId, resp.declarationId, resp.err
+	return symResp.symbolId, symResp.declarationId, resp.err
 }
 
 func (i *Index) AddReference(from DeclarationId, to string, start token.Position, end token.Position) {
@@ -290,7 +322,7 @@ func (i *Index) AddReference(from DeclarationId, to string, start token.Position
 
 func (i *Index) loop() {
 	for message := range i.channel {
-		message.handle(i)
+		Handle(message, i)
 		i.wg.Done()
 	}
 }
