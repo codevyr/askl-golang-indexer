@@ -102,22 +102,42 @@ func (f *FileParser) callExprParser(fn *ast.FuncDecl, declId index.DeclarationId
 
 			// Check if the function call has an identifier (direct function call)
 			var call string
-			if ident, ok := callExpr.Fun.(*ast.Ident); ok {
-				if obj, ok := f.pkg.TypesInfo.Uses[ident]; ok {
-					pos := f.pkg.Fset.Position(obj.Pos())
-					call = fmt.Sprintf("%s:%v:%s", obj.Pkg(), pos, ident.Name)
-				} else {
-					call = ident.Name
-				}
-			} else if sel, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
-				// Method call or package-qualified function call
-				if obj, ok := f.pkg.TypesInfo.Uses[sel.Sel]; ok {
-					pos := f.pkg.Fset.Position(obj.Pos())
-					call = fmt.Sprintf("%s:%v:%s.%s", obj.Pkg(), pos, sel.X, sel.Sel.Name)
-				} else {
-					call = fmt.Sprintf("%s.%s", sel.X, sel.Sel.Name)
-				}
+			var ident *ast.Ident
+			switch fun := callExpr.Fun.(type) {
+			case *ast.Ident:
+				ident = fun
+				call = fun.Name
+			case *ast.SelectorExpr:
+				ident = fun.Sel
+				call = fmt.Sprintf("%s.%s", fun.X, fun.Sel.Name)
+			case *ast.FuncLit:
+				log.Println("Unimplemented")
+				return true
+			case *ast.ParenExpr:
+				log.Println("Unimplemented")
+				return true
+			case *ast.CallExpr:
+				log.Println("Unimplemented")
+				return true
+			case *ast.TypeAssertExpr:
+				log.Println("Unimplemented")
+				return true
+			case *ast.IndexExpr:
+				log.Println("Unimplemented")
+				return true
+			case *ast.ArrayType:
+				// We do not care about array initialization
+				return true
+			default:
+				log.Fatalf("Unknown call expression type %T %s %s", fun, start, end)
 			}
+			obj, ok := f.pkg.TypesInfo.Uses[ident]
+			if !ok {
+				log.Fatalf("Failed to resolve identifier: %s", ident.Name)
+			}
+			pos := f.pkg.Fset.Position(obj.Pos())
+
+			log.Printf(">>>>> %s:%s:%s", obj.Pkg(), pos, call)
 			f.index.AddReference(declId, call, start, end)
 		}
 		return true
