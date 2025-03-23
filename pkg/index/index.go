@@ -210,12 +210,89 @@ type Symbol struct {
 
 var _ IndexItem = &Symbol{}
 
-func (i *Symbol) handle(index *Index) (interface{}, error) {
-	fmt.Println("  Symbol:", i.fileId, i.name, i.scope, i.start, i.end)
+//go:embed sql/select_symbol.sql
+var selectSymbolSQL string
+
+//go:embed sql/insert_symbol.sql
+var insertSymbolSQL string
+
+//go:embed sql/select_declaration.sql
+var selectDeclarationSQL string
+
+//go:embed sql/insert_declaration.sql
+var insertDeclarationSQL string
+
+func (s *Symbol) getSymbolId(index *Index) (SymbolId, error) {
+
+	row := index.db.QueryRow(selectSymbolSQL, s.name, s.fileId, s.scope)
+
+	var symbolId SymbolId
+	var err error
+	if err = row.Scan(&symbolId); err == nil {
+		return symbolId, nil
+	} else if err == sql.ErrNoRows {
+		// We exit the if condition to to insert the row.
+	} else {
+		return -1, err
+	}
+
+	res, err := index.db.Exec(insertSymbolSQL, s.name, s.fileId, s.scope)
+	if err != nil {
+		return -1, err
+	}
+
+	var symbolIdInt int64
+	if symbolIdInt, err = res.LastInsertId(); err != nil {
+		return -1, err
+	}
+
+	return SymbolId(symbolIdInt), nil
+}
+
+func (s *Symbol) handle(index *Index) (interface{}, error) {
+	fmt.Println("  Symbol:", s.fileId, s.name, s.scope, s.start, s.end)
+
+	symbolId, err := s.getSymbolId(index)
+	if err != nil {
+		return nil, err
+	}
+
+	row := index.db.QueryRow(
+		selectDeclarationSQL, symbolId, s.fileId,
+		s.start.Line, s.start.Column,
+		s.end.Line, s.end.Column,
+	)
+
+	var declarationId DeclarationId
+	if err = row.Scan(&declarationId); err == nil {
+		return SymbolResp{
+			symbolId:      symbolId,
+			declarationId: declarationId,
+		}, nil
+	} else if err == sql.ErrNoRows {
+		// We exit the if condition to to insert the row.
+	} else {
+		return -1, err
+	}
+
+	res, err := index.db.Exec(insertDeclarationSQL,
+		symbolId, s.fileId,
+		ScopeDefinition,
+		s.start.Line, s.start.Column,
+		s.end.Line, s.end.Column,
+	)
+	if err != nil {
+		return -1, err
+	}
+
+	var declarationIdInt int64
+	if declarationIdInt, err = res.LastInsertId(); err != nil {
+		return -1, err
+	}
 
 	return SymbolResp{
-		symbolId:      1,
-		declarationId: 1,
+		symbolId:      symbolId,
+		declarationId: DeclarationId(declarationIdInt),
 	}, nil
 }
 
@@ -302,6 +379,9 @@ func (i *Index) AddSymbol(fileId FileId, name string, scope SymbolScope, start t
 	}
 	i.channel <- s
 	resp := <-s.respChan()
+	if resp.err != nil {
+		return -1, -1, resp.err
+	}
 	symResp := resp.val.(SymbolResp)
 
 	return symResp.symbolId, symResp.declarationId, resp.err
