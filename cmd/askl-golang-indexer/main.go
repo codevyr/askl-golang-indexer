@@ -124,6 +124,8 @@ func parseModule(flags Flags, packageType ModuleType) error {
 	index, err := index.NewIndex(
 		index.WithIndexPath(flags.indexPath),
 		index.WithRecreate(true),
+		index.WithJournal(index.JournalModeOff),
+		index.WithSynchronous(index.SynchronousModeOff),
 	)
 	if err != nil {
 		return err

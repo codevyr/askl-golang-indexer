@@ -15,9 +15,10 @@ const (
 )
 
 type Config struct {
-	project   string
-	indexPath string
-	recreate  bool
+	project         string
+	indexPath       string
+	extraSqliteArgs string
+	recreate        bool
 }
 
 type Option interface {
@@ -25,8 +26,9 @@ type Option interface {
 }
 
 type indexPathOption struct {
-	indexPath string
-	project   string
+	indexPath       string
+	extraSqliteArgs string
+	project         string
 }
 
 func WithIndexPath(indexPath string) Option {
@@ -41,8 +43,53 @@ func WithProject(project string) Option {
 	}
 }
 
+type JournalMode string
+
+const (
+	JournalModeDelete   JournalMode = "DELETE"
+	JournalModeTruncate             = "TRUNCATE"
+	JournalModePersist              = "PERSIST"
+	JournalModeMemory               = "MEMORY"
+	JournalModeWal                  = "WAL"
+	JournalModeOff                  = "OFF"
+)
+
+func WithJournal(mode JournalMode) Option {
+	return &indexPathOption{
+		extraSqliteArgs: fmt.Sprintf("_journal=%s", mode),
+	}
+}
+
+type SynchronousMode string
+
+const (
+	SynchronousModeOff    SynchronousMode = "OFF"
+	SynchronousModeNormal                 = "NORMAL"
+	SynchronousModeFull                   = "FULL"
+	SynchronousModeExtra                  = "EXTRA"
+)
+
+func WithSynchronous(mode SynchronousMode) Option {
+	return &indexPathOption{
+		extraSqliteArgs: fmt.Sprintf("_synchronous=%s", mode),
+	}
+}
+
 func (o *indexPathOption) apply(config *Config) {
-	config.indexPath = o.indexPath
+	if o.project != "" {
+		config.project = o.project
+	}
+
+	if o.indexPath != "" {
+		config.indexPath = o.indexPath
+	}
+
+	if o.extraSqliteArgs != "" {
+		if config.extraSqliteArgs != "" {
+			config.extraSqliteArgs += "&"
+		}
+		config.extraSqliteArgs += o.extraSqliteArgs
+	}
 }
 
 type recreateOption struct {
@@ -328,7 +375,10 @@ func NewIndex(options ...Option) (*Index, error) {
 		option.apply(&config)
 	}
 
-	db, err := sql.Open("sqlite3", config.indexPath)
+	db, err := sql.Open(
+		"sqlite3",
+		fmt.Sprintf("%s?%s", config.indexPath, config.extraSqliteArgs),
+	)
 	if err != nil {
 		return nil, err
 	}
