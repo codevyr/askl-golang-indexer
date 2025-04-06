@@ -13,7 +13,6 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"golang.org/x/mod/modfile"
-	"golang.org/x/tools/go/packages"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
 )
@@ -138,28 +137,21 @@ func parseModule(flags Flags, packageType ModuleType) error {
 	}
 
 	log.Printf("%v", module.Module.Mod.Path)
-	modulePath := module.Module.Mod.Path
 
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.LoadImports | packages.LoadAllSyntax,
-		Dir:  flags.packagePath,
-		// Dir, Env, or other settings can be specified if needed
-	}
-
-	pkgs, err := packages.Load(cfg, modulePath)
-	if err != nil {
-		return fmt.Errorf("failed to load a package: %w", err)
-	}
-
-	parser := NewParser()
+	parser := NewParser(module.Module.Mod.Path, flags.packagePath, index)
 	defer parser.Close()
 
-	// pkgs now contains package metadata, ASTs, type info, etc.
-	for _, p := range pkgs {
-		err := parser.Parse(NewPackageParser(p, index))
-		if err != nil {
-			return err
-		}
+	err = parser.AddPackages()
+	if err != nil {
+		return err
+	}
+
+	parser.Wait()
+	log.Println("Parsing files done")
+
+	err = index.ResolveReferences()
+	if err != nil {
+		return err
 	}
 
 	// // Requirements
@@ -180,8 +172,6 @@ func parseModule(flags Flags, packageType ModuleType) error {
 
 	// 	// We ignore excludes, because they only impact modules that use this module
 	// }
-
-	parser.Wait()
 
 	return nil
 }

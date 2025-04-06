@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"go/ast"
+	"go/types"
 	"log"
 	"sync"
 	"unicode"
 
-	"github.com/planetA/askl-golang-indexer/pkg/index"
 	"golang.org/x/tools/go/packages"
+
+	"github.com/planetA/askl-golang-indexer/pkg/index"
 )
 
 type Parsable interface {
@@ -31,15 +33,13 @@ func NewPackageParser(pkg *packages.Package, index *index.Index) *PackageParser 
 }
 
 func (p *PackageParser) Parse(parser *Parser) error {
-	fmt.Println("Package Name:", p.pkg.Name)
-
 	if len(p.pkg.CompiledGoFiles) != len(p.pkg.Syntax) {
 		log.Println(p.pkg.CompiledGoFiles, p.pkg.Syntax)
 		return fmt.Errorf("not all files in a package have been parsed")
 	}
 
 	for i, file := range p.pkg.CompiledGoFiles {
-		fileParser, err := NewFileParser(p.pkg, file, p.pkg.Syntax[i], p.index)
+		fileParser, err := NewFileParser(parser, p.pkg, file, p.pkg.Syntax[i], p.index)
 		if err != nil {
 			return err
 		}
@@ -64,6 +64,7 @@ func (p *PackageParser) GetId() (string, bool) {
 }
 
 type FileParser struct {
+	parser   *Parser
 	filepath string
 	fileId   index.FileId
 	ast      *ast.File
@@ -73,13 +74,14 @@ type FileParser struct {
 
 var _ Parsable = &FileParser{}
 
-func NewFileParser(pkg *packages.Package, filepath string, ast *ast.File, index *index.Index) (*FileParser, error) {
+func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *ast.File, index *index.Index) (*FileParser, error) {
 	fileId, err := index.AddFile(pkg.Dir, filepath)
 	if err != nil {
 		return nil, err
 	}
 
 	return &FileParser{
+		parser:   parser,
 		filepath: filepath,
 		ast:      ast,
 		pkg:      pkg,
@@ -109,9 +111,8 @@ func (f *FileParser) callExprParser(fn *ast.FuncDecl, declId index.DeclarationId
 				call = fun.Name
 			case *ast.SelectorExpr:
 				ident = fun.Sel
-				call = fmt.Sprintf("%s.%s", fun.X, fun.Sel.Name)
 			case *ast.FuncLit:
-				log.Println("Unimplemented")
+				log.Println("Unimplemented:", start, end)
 				return true
 			case *ast.ParenExpr:
 				log.Println("Unimplemented")
@@ -125,20 +126,53 @@ func (f *FileParser) callExprParser(fn *ast.FuncDecl, declId index.DeclarationId
 			case *ast.IndexExpr:
 				log.Println("Unimplemented")
 				return true
+			case *ast.IndexListExpr:
+				log.Println("Unimplemented")
+				return true
 			case *ast.ArrayType:
 				// We do not care about array initialization
 				return true
 			default:
 				log.Fatalf("Unknown call expression type %T %s %s", fun, start, end)
 			}
-			obj, ok := f.pkg.TypesInfo.Uses[ident]
-			if !ok {
-				log.Fatalf("Failed to resolve identifier: %s", ident.Name)
+			obj := f.pkg.TypesInfo.ObjectOf(ident)
+			if !obj.Pos().IsValid() {
+				log.Println("Unimplemented built in support:", call, start, end)
+				return true
+			}
+			switch obj := obj.(type) {
+			case *types.Func:
+				call = obj.FullName()
+				sig, ok := obj.Type().(*types.Signature)
+				if !ok {
+					log.Fatalf("Function %s has no signature", call)
+				}
+				if sig.Recv() != nil {
+					if _, ok := sig.Recv().Type().Underlying().(*types.Interface); ok {
+						log.Println("Unimplemented abstract interface:", obj.String(), start, end)
+						// Method in an interface, so no actual body
+						return true
+					}
+					if sig.Recv() != sig.Recv().Origin() {
+						log.Println("Unimplemented generic interface:", obj.String(), start, end)
+						return true
+					}
+				}
+			case *types.TypeName:
+				log.Println("Unimplemented:", obj.String(), start, end)
+				return true
+			case *types.Var:
+				log.Println("Unimplemented:", obj.String(), start, end)
+				return true
+			case *types.Builtin:
+				log.Println("Unimplemented:", obj.String(), start, end)
+				return true
+			default:
+				log.Panicf("Unimplemented %+T", obj)
 			}
 			pos := f.pkg.Fset.Position(obj.Pos())
 
-			log.Printf(">>>>> %s:%s:%s", obj.Pkg(), pos, call)
-			f.index.AddReference(declId, call, start, end)
+			f.index.AddReference(declId, pos, call, start, end)
 		}
 		return true
 	})
@@ -160,21 +194,17 @@ func GetSymbolScope(name string) index.SymbolScope {
 func (f *FileParser) funcDeclParser(n ast.Node) bool {
 	// Check if the node is a function declaration
 	if fn, ok := n.(*ast.FuncDecl); ok {
-		var fullName string
-		if fn.Recv != nil {
-			f := fn.Recv.List[0]
-			if f.Names != nil {
-				fullName = fmt.Sprintf("%s.%s", getReceiverType(f.Type), fn.Name.Name)
-			}
-		} else {
-			fullName = fn.Name.Name
+		obj, ok := f.pkg.TypesInfo.Defs[fn.Name]
+		if !ok {
+			log.Panicf("Expected to find definition %s", fn.Name)
 		}
+		objFunc := obj.(*types.Func)
+		fullName := objFunc.FullName()
 
 		symbolScope := GetSymbolScope(fn.Name.Name)
 
-		start := f.pkg.Fset.Position(n.Pos())
+		start := f.pkg.Fset.Position(fn.Pos())
 		end := f.pkg.Fset.Position(n.End())
-
 		_, declId, err := f.index.AddSymbol(f.fileId, fullName, symbolScope, start, end)
 		if err != nil {
 			log.Fatalf("Failed to add symbol: %s", err)
@@ -214,15 +244,21 @@ func (p *FileParser) GetId() (string, bool) {
 }
 
 type Parser struct {
+	modulePath     string
+	packagePath    string
+	index          *index.Index
 	parsedPackaged map[string]bool
 	channel        chan Parsable
 	wg             sync.WaitGroup
 }
 
-func NewParser() *Parser {
+func NewParser(modulePath, packagePath string, index *index.Index) *Parser {
 	c := make(chan Parsable)
 
 	p := &Parser{
+		modulePath:     modulePath,
+		packagePath:    packagePath,
+		index:          index,
 		parsedPackaged: make(map[string]bool),
 		channel:        c,
 	}
@@ -230,6 +266,35 @@ func NewParser() *Parser {
 	go p.loop()
 
 	return p
+}
+
+func (p *Parser) AddPackages() error {
+
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.LoadImports | packages.LoadAllSyntax,
+		Dir:  p.packagePath,
+		// Dir, Env, or other settings can be specified if needed
+	}
+
+	pkgs, err := packages.Load(cfg, p.modulePath)
+	if err != nil {
+		return fmt.Errorf("failed to load a package: %w", err)
+	}
+
+	// pkgs now contains package metadata, ASTs, type info, etc.
+	for _, pkg := range pkgs {
+		err := p.Parse(NewPackageParser(pkg, p.index))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (p *Parser) AddPackage(pkg *types.Package) error {
+
+	return nil
 }
 
 func (p *Parser) Wait() {

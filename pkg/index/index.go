@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"fmt"
 	"go/token"
+	"log"
+	"strconv"
 	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -47,11 +49,11 @@ type JournalMode string
 
 const (
 	JournalModeDelete   JournalMode = "DELETE"
-	JournalModeTruncate             = "TRUNCATE"
-	JournalModePersist              = "PERSIST"
-	JournalModeMemory               = "MEMORY"
-	JournalModeWal                  = "WAL"
-	JournalModeOff                  = "OFF"
+	JournalModeTruncate JournalMode = "TRUNCATE"
+	JournalModePersist  JournalMode = "PERSIST"
+	JournalModeMemory   JournalMode = "MEMORY"
+	JournalModeWal      JournalMode = "WAL"
+	JournalModeOff      JournalMode = "OFF"
 )
 
 func WithJournal(mode JournalMode) Option {
@@ -64,9 +66,9 @@ type SynchronousMode string
 
 const (
 	SynchronousModeOff    SynchronousMode = "OFF"
-	SynchronousModeNormal                 = "NORMAL"
-	SynchronousModeFull                   = "FULL"
-	SynchronousModeExtra                  = "EXTRA"
+	SynchronousModeNormal SynchronousMode = "NORMAL"
+	SynchronousModeFull   SynchronousMode = "FULL"
+	SynchronousModeExtra  SynchronousMode = "EXTRA"
 )
 
 func WithSynchronous(mode SynchronousMode) Option {
@@ -173,8 +175,6 @@ var selectFileSQL string
 var insertFileSQL string
 
 func (f *File) handle(index *Index) (interface{}, error) {
-	fmt.Println("GoFiles:", f.path)
-
 	row := index.db.QueryRow(selectFileSQL, f.path, index.project)
 
 	fileResp := FileResp{}
@@ -241,6 +241,10 @@ const (
 type SymbolId int
 type DeclarationId int
 
+func (id DeclarationId) String() string {
+	return strconv.Itoa(int(id))
+}
+
 type SymbolResp struct {
 	symbolId      SymbolId
 	declarationId DeclarationId
@@ -268,6 +272,9 @@ var selectDeclarationSQL string
 
 //go:embed sql/insert_declaration.sql
 var insertDeclarationSQL string
+
+//go:embed sql/insert_reference.sql
+var insertReferenceSQL string
 
 func (s *Symbol) getSymbolId(index *Index) (SymbolId, error) {
 
@@ -297,8 +304,6 @@ func (s *Symbol) getSymbolId(index *Index) (SymbolId, error) {
 }
 
 func (s *Symbol) handle(index *Index) (interface{}, error) {
-	fmt.Println("  Symbol:", s.fileId, s.name, s.scope, s.start, s.end)
-
 	symbolId, err := s.getSymbolId(index)
 	if err != nil {
 		return nil, err
@@ -345,18 +350,55 @@ func (s *Symbol) handle(index *Index) (interface{}, error) {
 
 type Reference struct {
 	IndexItemNoResp
-	from  DeclarationId
-	to    SymbolId
-	start token.Position
-	end   token.Position
+	from   DeclarationId
+	to     token.Position
+	toName string
+	start  token.Position
+	end    token.Position
+	wg     *sync.WaitGroup
+}
+
+type ReferenceResp struct {
 }
 
 var _ IndexItem = &Reference{}
 
 func (i *Reference) handle(index *Index) (interface{}, error) {
-	fmt.Println("  Reference:", i.from, i.to, i.start, i.end)
+	// fmt.Println("  Reference:", i.from, i.to, i.start, i.end)
+	// First find symbol ID for the `to` symbol.
 
-	return nil, nil
+	defer i.wg.Done()
+
+	row := index.db.QueryRow(
+		`SELECT declarations.symbol
+FROM ((declarations
+INNER JOIN files ON files.id = declarations.file_id)
+INNER JOIN symbols ON symbols.id = declarations.symbol)
+WHERE files.path = ?  AND name = ?`,
+		i.to.Filename,
+		i.toName,
+	)
+
+	var to SymbolId
+	if err := row.Scan(&to); err == nil {
+		log.Printf("Found symbol %+v", to)
+	} else {
+		log.Printf("Not Found symbol from=%s '%s' %s-%s %s %s",
+			i.from,
+			i.to, i.start, i.end, i.toName, err)
+		return nil, err
+	}
+
+	_, err := index.db.Exec(insertReferenceSQL,
+		i.from, to,
+		i.start.Line, i.start.Column,
+		i.end.Column,
+	)
+	if err != nil {
+		return -1, err
+	}
+
+	return ReferenceResp{}, nil
 }
 
 type Index struct {
@@ -364,6 +406,8 @@ type Index struct {
 	db      *sql.DB
 	channel chan IndexItem
 	wg      sync.WaitGroup
+
+	referencesLog []*Reference
 }
 
 //go:embed sql/create_tables.sql
@@ -391,9 +435,10 @@ func NewIndex(options ...Option) (*Index, error) {
 	}
 
 	index := &Index{
-		project: config.project,
-		db:      db,
-		channel: make(chan IndexItem),
+		project:       config.project,
+		db:            db,
+		channel:       make(chan IndexItem),
+		referencesLog: make([]*Reference, 0),
 	}
 
 	go index.loop()
@@ -437,17 +482,29 @@ func (i *Index) AddSymbol(fileId FileId, name string, scope SymbolScope, start t
 	return symResp.symbolId, symResp.declarationId, resp.err
 }
 
-func (i *Index) AddReference(from DeclarationId, to string, start token.Position, end token.Position) {
-	i.wg.Add(1)
+func (i *Index) AddReference(from DeclarationId, to token.Position, toName string, start token.Position, end token.Position) {
+	i.referencesLog = append(i.referencesLog,
+		&Reference{
+			IndexItemNoResp: NewIndexItemNoResp(),
+			from:            from,
+			to:              to,
+			toName:          toName,
+			start:           start,
+			end:             end,
+			wg:              &i.wg,
+		},
+	)
+}
 
-	go func() {
-		i.channel <- &Reference{
-			from:  from,
-			to:    1,
-			start: start,
-			end:   end,
-		}
-	}()
+func (i *Index) ResolveReferences() error {
+	i.wg.Add(len(i.referencesLog) * 2)
+	for _, ref := range i.referencesLog {
+		go func() {
+			i.channel <- ref
+		}()
+	}
+
+	return nil
 }
 
 func (i *Index) loop() {
