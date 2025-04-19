@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -162,6 +163,7 @@ type FileResp struct {
 
 type File struct {
 	IndexItemWithResp
+	module string
 	pkgDir string
 	path   string
 }
@@ -187,7 +189,12 @@ func (f *File) handle(index *Index) (interface{}, error) {
 		return nil, err
 	}
 
-	res, err := index.db.Exec(insertFileSQL, index.project, f.pkgDir, f.path, goFileType)
+	modulePath, ok := strings.CutPrefix(f.path, f.pkgDir)
+	if !ok {
+		log.Printf("file %v is not in the directory %v", f.path, f.pkgDir)
+		modulePath = f.path
+	}
+	res, err := index.db.Exec(insertFileSQL, f.module, modulePath, f.path, goFileType)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +371,6 @@ type ReferenceResp struct {
 var _ IndexItem = &Reference{}
 
 func (i *Reference) handle(index *Index) (interface{}, error) {
-	// fmt.Println("  Reference:", i.from, i.to, i.start, i.end)
 	// First find symbol ID for the `to` symbol.
 
 	defer i.wg.Done()
@@ -374,7 +380,7 @@ func (i *Reference) handle(index *Index) (interface{}, error) {
 FROM ((declarations
 INNER JOIN files ON files.id = declarations.file_id)
 INNER JOIN symbols ON symbols.id = declarations.symbol)
-WHERE files.path = ?  AND name = ?`,
+WHERE files.filesystem_path = ?  AND name = ?`,
 		i.to.Filename,
 		i.toName,
 	)
@@ -446,17 +452,18 @@ func NewIndex(options ...Option) (*Index, error) {
 	return index, nil
 }
 
-func (i *Index) AddFile(pkgDir, path string) (FileId, error) {
+func (i *Index) AddFile(pkgDir, module, path string) (FileId, error) {
 	i.wg.Add(1)
 
 	f := &File{
 		IndexItemWithResp: NewIndexItemWithResp(),
+		module:            module,
 		pkgDir:            pkgDir,
 		path:              path,
 	}
 	i.channel <- f
 	resp := <-f.respChan()
-	fileResp := resp.val.(FileResp)
+	fileResp, _ := resp.val.(FileResp)
 
 	return fileResp.fileId, resp.err
 }

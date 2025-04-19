@@ -1,3 +1,3 @@
 SELECT id
 FROM files
-WHERE path = ?1 AND project = ?2;
+WHERE module = ?1 AND module_path = ?2;

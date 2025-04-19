@@ -75,7 +75,7 @@ type FileParser struct {
 var _ Parsable = &FileParser{}
 
 func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *ast.File, index *index.Index) (*FileParser, error) {
-	fileId, err := index.AddFile(pkg.Dir, filepath)
+	fileId, err := index.AddFile(pkg.Dir, pkg.PkgPath, filepath)
 	if err != nil {
 		return nil, err
 	}
