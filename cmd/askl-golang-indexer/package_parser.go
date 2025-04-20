@@ -129,6 +129,15 @@ func (f *FileParser) callExprParser(fn *ast.FuncDecl, declId index.DeclarationId
 			case *ast.IndexListExpr:
 				log.Println("Unimplemented")
 				return true
+			case *ast.ChanType:
+				log.Println("Unimplemented")
+				return true
+			case *ast.InterfaceType:
+				log.Println("Unimplemented")
+				return true
+			case *ast.MapType:
+				log.Println("Unimplemented")
+				return true
 			case *ast.ArrayType:
 				// We do not care about array initialization
 				return true
@@ -276,7 +285,7 @@ func (p *Parser) AddPackages() error {
 		// Dir, Env, or other settings can be specified if needed
 	}
 
-	pkgs, err := packages.Load(cfg, p.modulePath)
+	pkgs, err := packages.Load(cfg, p.packagePath)
 	if err != nil {
 		return fmt.Errorf("failed to load a package: %w", err)
 	}

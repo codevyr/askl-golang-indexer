@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -14,7 +15,21 @@ import (
 )
 
 func getModulePath(packagePath string) (*modfile.File, error) {
-	goModPath := path.Join(packagePath, "go.mod")
+	curPath := packagePath
+	var goModPath string
+	for {
+		goModPath = path.Join(curPath, "go.mod")
+		if _, err := os.Stat(goModPath); err == nil {
+			break
+		} else if curPath == "/" && errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("could not find mod path neither in %v, nor in parent directories", packagePath)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("failed to open mod file: %w", err)
+		}
+
+		curPath = path.Dir(curPath)
+	}
+
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
 		return nil, fmt.Errorf("could not read go.mod file: %v", err)
@@ -57,7 +72,7 @@ func parseModule(flags Flags, packageType ModuleType) error {
 		return err
 	}
 
-	log.Printf("%v", module.Module.Mod.Path)
+	log.Printf("Module path: %v Package path %v", module.Module.Mod.Path, flags.packagePath)
 
 	parser := NewParser(module.Module.Mod.Path, flags.packagePath, index)
 	defer parser.Close()
