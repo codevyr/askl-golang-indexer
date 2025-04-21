@@ -155,6 +155,53 @@ func (i *IndexItemNoResp) respChan() chan IndexItemResp {
 	return nil
 }
 
+type ModuleId int64
+
+type ModuleResp struct {
+	moduleId ModuleId
+}
+
+type Module struct {
+	IndexItemWithResp
+	name string
+}
+
+var _ IndexItem = &File{}
+
+//go:embed sql/select_module.sql
+var selectModuleSQL string
+
+//go:embed sql/insert_module.sql
+var insertModuleSQL string
+
+func (f *Module) handle(index *Index) (interface{}, error) {
+	row := index.db.QueryRow(selectModuleSQL, f.name)
+
+	moduleResp := ModuleResp{}
+	var err error
+	if err = row.Scan(&moduleResp.moduleId); err == nil {
+		return moduleResp, nil
+	} else if err == sql.ErrNoRows {
+		// We exit the if condition to to insert the row.
+	} else {
+		return nil, err
+	}
+
+	res, err := index.db.Exec(insertModuleSQL, f.name)
+	if err != nil {
+		return nil, err
+	}
+
+	var moduleId int64
+	if moduleId, err = res.LastInsertId(); err != nil {
+		return nil, err
+	}
+
+	return ModuleResp{
+		moduleId: ModuleId(moduleId),
+	}, nil
+}
+
 type FileId int64
 
 type FileResp struct {
@@ -163,7 +210,7 @@ type FileResp struct {
 
 type File struct {
 	IndexItemWithResp
-	module string
+	module ModuleId
 	pkgDir string
 	path   string
 }
@@ -259,11 +306,12 @@ type SymbolResp struct {
 
 type Symbol struct {
 	IndexItemWithResp
-	fileId FileId
-	name   string
-	scope  SymbolScope
-	start  token.Position
-	end    token.Position
+	moduleId ModuleId
+	fileId   FileId
+	name     string
+	scope    SymbolScope
+	start    token.Position
+	end      token.Position
 }
 
 var _ IndexItem = &Symbol{}
@@ -285,7 +333,7 @@ var insertReferenceSQL string
 
 func (s *Symbol) getSymbolId(index *Index) (SymbolId, error) {
 
-	row := index.db.QueryRow(selectSymbolSQL, s.name, s.fileId, s.scope)
+	row := index.db.QueryRow(selectSymbolSQL, s.name, s.moduleId, s.scope)
 
 	var symbolId SymbolId
 	var err error
@@ -297,7 +345,7 @@ func (s *Symbol) getSymbolId(index *Index) (SymbolId, error) {
 		return -1, err
 	}
 
-	res, err := index.db.Exec(insertSymbolSQL, s.name, s.fileId, s.scope)
+	res, err := index.db.Exec(insertSymbolSQL, s.name, s.moduleId, s.scope)
 	if err != nil {
 		return -1, err
 	}
@@ -452,12 +500,26 @@ func NewIndex(options ...Option) (*Index, error) {
 	return index, nil
 }
 
-func (i *Index) AddFile(pkgDir, module, path string) (FileId, error) {
+func (i *Index) AddModule(moduleName string) (ModuleId, error) {
+	i.wg.Add(1)
+
+	f := &Module{
+		IndexItemWithResp: NewIndexItemWithResp(),
+		name:              moduleName,
+	}
+	i.channel <- f
+	resp := <-f.respChan()
+	moduleResp, _ := resp.val.(ModuleResp)
+
+	return moduleResp.moduleId, resp.err
+}
+
+func (i *Index) AddFile(moduleId ModuleId, pkgDir, path string) (FileId, error) {
 	i.wg.Add(1)
 
 	f := &File{
 		IndexItemWithResp: NewIndexItemWithResp(),
-		module:            module,
+		module:            moduleId,
 		pkgDir:            pkgDir,
 		path:              path,
 	}
@@ -468,12 +530,13 @@ func (i *Index) AddFile(pkgDir, module, path string) (FileId, error) {
 	return fileResp.fileId, resp.err
 }
 
-func (i *Index) AddSymbol(fileId FileId, name string, scope SymbolScope, start token.Position, end token.Position) (SymbolId, DeclarationId, error) {
+func (i *Index) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, start token.Position, end token.Position) (SymbolId, DeclarationId, error) {
 	i.wg.Add(1)
 
 	s := &Symbol{
 		IndexItemWithResp: NewIndexItemWithResp(),
 		fileId:            fileId,
+		moduleId:          moduleId,
 		name:              name,
 		scope:             scope,
 		start:             start,

@@ -67,6 +67,7 @@ type FileParser struct {
 	parser   *Parser
 	filepath string
 	fileId   index.FileId
+	moduleId index.ModuleId
 	ast      *ast.File
 	pkg      *packages.Package
 	index    *index.Index
@@ -75,9 +76,13 @@ type FileParser struct {
 var _ Parsable = &FileParser{}
 
 func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *ast.File, index *index.Index) (*FileParser, error) {
-	fileId, err := index.AddFile(pkg.Dir, pkg.PkgPath, filepath)
+	moduleId, err := index.AddModule(pkg.PkgPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create module: %w", err)
+	}
+	fileId, err := index.AddFile(moduleId, pkg.Dir, filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file: %w", err)
 	}
 
 	return &FileParser{
@@ -87,6 +92,7 @@ func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *
 		pkg:      pkg,
 		index:    index,
 		fileId:   fileId,
+		moduleId: moduleId,
 	}, nil
 }
 
@@ -214,7 +220,7 @@ func (f *FileParser) funcDeclParser(n ast.Node) bool {
 
 		start := f.pkg.Fset.Position(fn.Pos())
 		end := f.pkg.Fset.Position(n.End())
-		_, declId, err := f.index.AddSymbol(f.fileId, fullName, symbolScope, start, end)
+		_, declId, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, start, end)
 		if err != nil {
 			log.Fatalf("Failed to add symbol: %s", err)
 		}
