@@ -239,21 +239,6 @@ func (f *FileParser) Parse(parser *Parser) error {
 	return nil
 }
 
-// getReceiverType extracts and formats the receiver type
-func getReceiverType(expr ast.Expr) string {
-	switch t := expr.(type) {
-	case *ast.Ident: // Example: func (p Person) Method() {}
-		return t.Name
-	case *ast.StarExpr: // Example: func (p *Person) Method() {}
-		return "*" + getReceiverType(t.X)
-	case *ast.IndexExpr: // Generic type (Go 1.18+), Example: func (p MyStruct[T]) Method() {}
-		return getReceiverType(t.X) + "[...]"
-	case *ast.IndexListExpr: // Generic type (multiple parameters)
-		return getReceiverType(t.X) + "[...]"
-	}
-	return "unknown"
-}
-
 func (p *FileParser) GetId() (string, bool) {
 	return p.filepath, true
 }
