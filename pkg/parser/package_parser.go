@@ -151,7 +151,10 @@ func (f *FileParser) callExprParser(fn *ast.FuncDecl, declId index.DeclarationId
 			}
 			obj := f.pkg.TypesInfo.ObjectOf(ident)
 			if !obj.Pos().IsValid() {
+				uniObj := types.Universe.Lookup(ident.Name)
 				log.Println("Unimplemented built in support:", call, start, end)
+				typeValue, ok := f.pkg.TypesInfo.Types[callExpr.Fun]
+				log.Printf("Object: %+v %+T TYPES VALUE %+v %v %+v", obj, obj, typeValue.IsBuiltin(), ok, uniObj.Pos().IsValid())
 				return true
 			}
 			switch obj := obj.(type) {
@@ -243,6 +246,8 @@ func (p *FileParser) GetId() (string, bool) {
 }
 
 type Parser struct {
+	builtinPkg *types.Package
+
 	packagePath    string
 	index          index.Index
 	parsedPackaged map[string]bool
@@ -273,7 +278,20 @@ func (p *Parser) AddPackages() error {
 		// Dir, Env, or other settings can be specified if needed
 	}
 
-	pkgs, err := packages.Load(cfg, p.packagePath)
+	var pkgs []*packages.Package
+	pkgs, err := packages.Load(cfg, "builtin")
+	if err != nil {
+		return fmt.Errorf("failed to load a package: %w", err)
+	}
+	if len(pkgs) != 1 {
+		return fmt.Errorf("expected one builtin package, got %d", len(pkgs))
+	}
+	err = p.Parse(NewPackageParser(pkgs[0], p.index))
+	if err != nil {
+		return err
+	}
+
+	pkgs, err = packages.Load(cfg, p.packagePath)
 	if err != nil {
 		return fmt.Errorf("failed to load a package: %w", err)
 	}

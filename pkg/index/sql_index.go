@@ -1,6 +1,7 @@
 package index
 
 import (
+	"cmp"
 	"database/sql"
 	_ "embed"
 	"fmt"
@@ -45,6 +46,10 @@ var (
 
 type ModuleId int64
 
+func (m ModuleId) Compare(other ModuleId) int {
+	return cmp.Compare(int64(m), int64(other))
+}
+
 type ModuleResp struct {
 	moduleId ModuleId
 }
@@ -85,6 +90,10 @@ func (f *Module) handle(index *SqlIndex) (interface{}, error) {
 }
 
 type FileId int64
+
+func (f FileId) Compare(other FileId) int {
+	return cmp.Compare(int64(f), int64(other))
+}
 
 type FileResp struct {
 	fileId FileId
@@ -163,6 +172,22 @@ func NewSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope,
 		s.end = token.Position{Line: 0, Column: 0}
 	}
 	return s
+}
+
+func (s *Symbol) Compare(other *Symbol) int {
+	if s.moduleId != other.moduleId {
+		return s.moduleId.Compare(other.moduleId)
+	}
+	if s.fileId != other.fileId {
+		return s.fileId.Compare(other.fileId)
+	}
+	if s.name != other.name {
+		return strings.Compare(s.name, other.name)
+	}
+	if s.scope != other.scope {
+		return cmp.Compare(s.scope, other.scope)
+	}
+	return 0
 }
 
 func (s *Symbol) getSymbolId(index *SqlIndex) (SymbolId, error) {
@@ -465,7 +490,7 @@ func (i *SqlIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scop
 
 func (i *SqlIndex) GetAllSymbols() ([]Symbol, error) {
 	rows, err := i.db.Query(
-		`SELECT symbols.id, symbols.name, symbols.symbol_scope, declarations.file_id, declarations.line_start, declarations.col_start, declarations.line_end, declarations.col_end
+		`SELECT symbols.module, symbols.name, symbols.symbol_scope, declarations.file_id, declarations.line_start, declarations.col_start, declarations.line_end, declarations.col_end
 FROM ((declarations
 INNER JOIN files ON files.id = declarations.file_id)
 INNER JOIN symbols ON symbols.id = declarations.symbol)`,
@@ -525,6 +550,67 @@ func (i *SqlIndex) ResolveReferences() error {
 type ReferenceNames struct {
 	From string
 	To   string
+}
+
+func NewReferenceNames(from, to string) ReferenceNames {
+	return ReferenceNames{
+		From: from,
+		To:   to,
+	}
+}
+
+type ReferenceMatcher struct {
+	expectedReference *ReferenceNames
+}
+
+func RepresentReference(expected *ReferenceNames) types.GomegaMatcher {
+	return &ReferenceMatcher{
+		expectedReference: expected,
+	}
+}
+
+func (matcher *ReferenceMatcher) Match(actual any) (success bool, err error) {
+	r, ok := actual.(ReferenceNames)
+	if !ok {
+		return false, fmt.Errorf("ReferenceMatcher matcher expects a ReferenceNames, got %T", actual)
+	}
+
+	if r.From != matcher.expectedReference.From || r.To != matcher.expectedReference.To {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (matcher *ReferenceMatcher) FailureMessage(actual any) (message string) {
+	var actualString string
+	if r, ok := actual.(ReferenceNames); ok {
+		actualString = fmt.Sprintf("{\n\tFrom: %s,\n\tTo: %s\n}", r.From, r.To)
+	} else {
+		actualString = fmt.Sprintf("%#v", actual)
+	}
+	var expectedString string
+	if matcher.expectedReference != nil {
+		expectedString = fmt.Sprintf("{\n\tFrom: %s,\n\tTo: %s\n}", matcher.expectedReference.From, matcher.expectedReference.To)
+	} else {
+		expectedString = "nil"
+	}
+	return fmt.Sprintf("Expected\n\t%s\nto contain the ReferenceNames representation of\n\t%s", actualString, expectedString)
+}
+
+func (matcher *ReferenceMatcher) NegatedFailureMessage(actual any) (message string) {
+	var actualString string
+	if r, ok := actual.(ReferenceNames); ok {
+		actualString = fmt.Sprintf("{\n\tFrom: %s,\n\tTo: %s\n}", r.From, r.To)
+	} else {
+		actualString = fmt.Sprintf("%#v", actual)
+	}
+	var expectedString string
+	if matcher.expectedReference != nil {
+		expectedString = fmt.Sprintf("{\n\tFrom: %s,\n\tTo: %s\n}", matcher.expectedReference.From, matcher.expectedReference.To)
+	} else {
+		expectedString = "nil"
+	}
+	return fmt.Sprintf("Expected\n\t%s\nnot to contain the ReferenceNames representation of\n\t%s", actualString, expectedString)
 }
 
 func (i *SqlIndex) GetAllReferencesNames() ([]ReferenceNames, error) {
