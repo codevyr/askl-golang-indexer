@@ -431,13 +431,13 @@ func (i *SqlIndex) loop() {
 	}
 }
 
-func (i *SqlIndex) Close() {
+func (i *SqlIndex) Close() error {
 	if i == nil {
-		return
+		return nil
 	}
 
 	i.wg.Wait()
 	close(i.channel)
 
-	i.db.Close()
+	return i.db.Close()
 }

@@ -1,17 +1,30 @@
 module github.com/planetA/askl-golang-indexer
 
-go 1.22.0
+go 1.23.0
 
-toolchain go1.22.2
+toolchain go1.24.1
+
+require (
+	github.com/mattn/go-sqlite3 v1.14.24
+	github.com/onsi/ginkgo/v2 v2.23.4
+	github.com/onsi/gomega v1.37.0
+	github.com/stretchr/testify v1.10.0
+	github.com/urfave/cli/v3 v3.0.0-beta1
+	golang.org/x/mod v0.24.0
+	golang.org/x/tools v0.31.0
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/mattn/go-sqlite3 v1.14.24 // indirect
+	github.com/go-logr/logr v1.4.2 // indirect
+	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/stretchr/testify v1.10.0 // indirect
-	github.com/urfave/cli/v3 v3.0.0-beta1 // indirect
-	golang.org/x/mod v0.23.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/tools v0.30.0 // indirect
+	go.uber.org/automaxprocs v1.6.0 // indirect
+	golang.org/x/net v0.37.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/sys v0.32.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
