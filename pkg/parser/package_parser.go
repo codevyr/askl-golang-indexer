@@ -97,7 +97,7 @@ func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *
 }
 
 // Find function calls in a given FuncDecl
-func (f *FileParser) callExprParser(parser *Parser, fn *ast.FuncDecl, declId index.DeclarationId) {
+func (f *FileParser) callExprParser(parser *Parser, fn *ast.FuncDecl, declId index.DeclarationId) (err error) {
 	if fn.Body == nil {
 		return
 	}
@@ -163,7 +163,6 @@ func (f *FileParser) callExprParser(parser *Parser, fn *ast.FuncDecl, declId ind
 					pos = parser.builtinPkg.Fset.Position(obj.Pos())
 					call = obj.Id()
 				}
-				log.Printf("Object: %+v %+T TYPES VALUE %+v %v %+v call %s", obj, obj, typeValue.IsBuiltin(), ok, obj.Pos().IsValid(), call)
 			} else {
 				switch obj := obj.(type) {
 				case *types.Func:
@@ -176,7 +175,6 @@ func (f *FileParser) callExprParser(parser *Parser, fn *ast.FuncDecl, declId ind
 						if _, ok := sig.Recv().Type().Underlying().(*types.Interface); ok {
 							log.Println("Unimplemented abstract interface:", obj.String(), start, end)
 							// Method in an interface, so no actual body
-							return true
 						}
 						if sig.Recv() != sig.Recv().Origin() {
 							log.Println("Unimplemented generic interface:", obj.String(), start, end)
@@ -203,6 +201,8 @@ func (f *FileParser) callExprParser(parser *Parser, fn *ast.FuncDecl, declId ind
 		}
 		return true
 	})
+
+	return
 }
 
 func GetSymbolScope(name string) index.SymbolScope {
@@ -218,34 +218,82 @@ func GetSymbolScope(name string) index.SymbolScope {
 	return index.ScopeLocal
 }
 
-func (f *FileParser) funcDeclParser(parser *Parser, n ast.Node) bool {
+func (f *FileParser) funcDeclParser(parser *Parser, fn *ast.FuncDecl) bool {
 	// Check if the node is a function declaration
-	if fn, ok := n.(*ast.FuncDecl); ok {
-		obj, ok := f.pkg.TypesInfo.Defs[fn.Name]
-		if !ok {
-			log.Panicf("Expected to find definition %s", fn.Name)
-		}
-		objFunc := obj.(*types.Func)
-		fullName := objFunc.FullName()
-
-		symbolScope := GetSymbolScope(fn.Name.Name)
-
-		start := f.pkg.Fset.Position(fn.Pos())
-		end := f.pkg.Fset.Position(n.End())
-		_, declId, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, start, end)
-		if err != nil {
-			log.Fatalf("Failed to add symbol: %s", err)
-		}
-
-		f.callExprParser(parser, fn, declId)
+	obj, ok := f.pkg.TypesInfo.Defs[fn.Name]
+	if !ok {
+		log.Panicf("Expected to find definition %s", fn.Name)
 	}
+	objFunc := obj.(*types.Func)
+	fullName := objFunc.FullName()
+
+	symbolScope := GetSymbolScope(fn.Name.Name)
+
+	start := f.pkg.Fset.Position(fn.Pos())
+	end := f.pkg.Fset.Position(fn.End())
+	_, declId, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeDefinition, start, end)
+	if err != nil {
+		log.Fatalf("Failed to add symbol: %s", err)
+	}
+
+	f.callExprParser(parser, fn, declId)
 	return true
+}
+
+func (f *FileParser) typeSpecParser(parser *Parser, ts *ast.TypeSpec) bool {
+	if ts.Name == nil {
+		log.Println("Skipping type spec with no name")
+		return false
+	}
+	name := ts.Name.Name
+
+	switch ts := ts.Type.(type) {
+	case *ast.InterfaceType:
+		if ts.Methods == nil {
+			log.Printf("Skipping empty interface %s", name)
+			return false
+		}
+
+		for _, method := range ts.Methods.List {
+			if len(method.Names) == 0 {
+				log.Printf("Skipping interface method with no name in %s", name)
+				continue
+			}
+			methodName := method.Names[0]
+			obj, ok := f.pkg.TypesInfo.Defs[methodName]
+			if !ok {
+				log.Panicf("Expected to find definition %s", methodName)
+			}
+			objFunc := obj.(*types.Func)
+			fullName := objFunc.FullName()
+			symbolScope := GetSymbolScope(methodName.Name)
+			start := f.pkg.Fset.Position(method.Pos())
+			end := f.pkg.Fset.Position(method.End())
+
+			_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeDeclaration, start, end)
+			if err != nil {
+				log.Fatalf("Failed to add symbol: %s", err)
+			}
+
+		}
+
+		return true // We do not handle interfaces yet
+	default:
+		return false
+	}
 }
 
 func (f *FileParser) Parse(parser *Parser) error {
 
 	ast.Inspect(f.ast, func(n ast.Node) bool {
-		return f.funcDeclParser(parser, n)
+		switch n := n.(type) {
+		case *ast.FuncDecl:
+			return f.funcDeclParser(parser, n)
+		case *ast.TypeSpec:
+			return f.typeSpecParser(parser, n)
+		default:
+			return true // continue traversing
+		}
 	})
 
 	return nil

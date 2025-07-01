@@ -143,23 +143,25 @@ func (f *File) handle(index *SqlIndex) (interface{}, error) {
 
 type Symbol struct {
 	IndexItemWithResp
-	moduleId ModuleId
-	fileId   FileId
-	name     string
-	scope    SymbolScope
-	start    token.Position
-	end      token.Position
+	moduleId   ModuleId
+	fileId     FileId
+	name       string
+	scope      SymbolScope
+	symbolType SymbolType
+	start      token.Position
+	end        token.Position
 }
 
 var _ IndexItem = &Symbol{}
 
-func NewSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, start *token.Position, end *token.Position) *Symbol {
+func NewSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start *token.Position, end *token.Position) *Symbol {
 	s := &Symbol{
 		IndexItemWithResp: NewIndexItemWithResp(),
 		moduleId:          moduleId,
 		fileId:            fileId,
 		name:              name,
 		scope:             scope,
+		symbolType:        symbolType,
 	}
 	if start != nil {
 		s.start = *start
@@ -243,7 +245,7 @@ func (s *Symbol) handle(index *SqlIndex) (interface{}, error) {
 
 	res, err := index.db.Exec(insertDeclarationSQL,
 		symbolId, s.fileId,
-		ScopeDefinition,
+		s.symbolType,
 		s.start.Line, s.start.Column,
 		s.end.Line, s.end.Column,
 	)
@@ -263,12 +265,12 @@ func (s *Symbol) handle(index *SqlIndex) (interface{}, error) {
 }
 
 type SymbolMatcher struct {
-	expectedSymbols *Symbol
+	Expected *Symbol
 }
 
 func RepresentSymbol(expected *Symbol) types.GomegaMatcher {
 	return &SymbolMatcher{
-		expectedSymbols: expected,
+		Expected: expected,
 	}
 }
 
@@ -278,21 +280,21 @@ func (matcher *SymbolMatcher) Match(actual any) (success bool, err error) {
 		return false, fmt.Errorf("SymbolMatcher matcher expects a Symbol, got %T", actual)
 	}
 
-	rest := s.moduleId == matcher.expectedSymbols.moduleId &&
-		s.fileId == matcher.expectedSymbols.fileId &&
-		strings.HasSuffix(s.name, matcher.expectedSymbols.name) &&
-		s.scope == matcher.expectedSymbols.scope
+	rest := s.moduleId == matcher.Expected.moduleId &&
+		s.fileId == matcher.Expected.fileId &&
+		strings.HasSuffix(s.name, matcher.Expected.name) &&
+		s.scope == matcher.Expected.scope
 	if !rest {
 		return false, nil
 	}
 
 	zeroPosition := token.Position{Line: 0, Column: 0}
-	if matcher.expectedSymbols.start == zeroPosition && matcher.expectedSymbols.end == zeroPosition {
+	if matcher.Expected.start == zeroPosition && matcher.Expected.end == zeroPosition {
 		return true, nil
 	}
 
-	return s.start == matcher.expectedSymbols.start &&
-		s.end == matcher.expectedSymbols.end, nil
+	return s.start == matcher.Expected.start &&
+		s.end == matcher.Expected.end, nil
 }
 
 func (matcher *SymbolMatcher) FailureMessage(actual any) (message string) {
@@ -305,10 +307,10 @@ func (matcher *SymbolMatcher) FailureMessage(actual any) (message string) {
 	}
 
 	var expectedString string
-	if matcher.expectedSymbols != nil {
+	if matcher.Expected != nil {
 		expectedString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
-			matcher.expectedSymbols.moduleId, matcher.expectedSymbols.fileId, matcher.expectedSymbols.name,
-			matcher.expectedSymbols.scope, matcher.expectedSymbols.start, matcher.expectedSymbols.end)
+			matcher.Expected.moduleId, matcher.Expected.fileId, matcher.Expected.name,
+			matcher.Expected.scope, matcher.Expected.start, matcher.Expected.end)
 	} else {
 		expectedString = "nil"
 	}
@@ -325,10 +327,10 @@ func (matcher *SymbolMatcher) NegatedFailureMessage(actual any) (message string)
 	}
 
 	var expectedString string
-	if matcher.expectedSymbols != nil {
+	if matcher.Expected != nil {
 		expectedString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
-			matcher.expectedSymbols.moduleId, matcher.expectedSymbols.fileId, matcher.expectedSymbols.name,
-			matcher.expectedSymbols.scope, matcher.expectedSymbols.start, matcher.expectedSymbols.end)
+			matcher.Expected.moduleId, matcher.Expected.fileId, matcher.Expected.name,
+			matcher.Expected.scope, matcher.Expected.start, matcher.Expected.end)
 	} else {
 		expectedString = "nil"
 	}
@@ -470,7 +472,7 @@ func (i *SqlIndex) AddFile(moduleId ModuleId, pkgDir, path string) (FileId, erro
 	return fileResp.fileId, resp.err
 }
 
-func (i *SqlIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, start token.Position, end token.Position) (SymbolId, DeclarationId, error) {
+func (i *SqlIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, DeclarationId, error) {
 	i.wg.Add(1)
 
 	log.Printf("AddSymbol: moduleId=%d, fileId=%d, name=%s, scope=%s, start=%v, end=%v",
@@ -481,6 +483,7 @@ func (i *SqlIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scop
 		moduleId:          moduleId,
 		name:              name,
 		scope:             scope,
+		symbolType:        symbolType,
 		start:             start,
 		end:               end,
 	}

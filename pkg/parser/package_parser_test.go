@@ -15,28 +15,29 @@ import (
 )
 
 var builtinSymbols = []*index.Symbol{
-	index.NewSymbol(1, 1, "builtin.append", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.cap", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.clear", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.close", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.complex", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.copy", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.delete", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.imag", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.len", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.make", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.max", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.min", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.new", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.panic", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.print", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.println", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.real", index.ScopeLocal, nil, nil),
-	index.NewSymbol(1, 1, "builtin.recover", index.ScopeLocal, nil, nil),
-	index.NewSymbol(2, 2, "cmp.Compare", index.ScopeGlobal, nil, nil),
-	index.NewSymbol(2, 2, "cmp.Less", index.ScopeGlobal, nil, nil),
-	index.NewSymbol(2, 2, "cmp.Or", index.ScopeGlobal, nil, nil),
-	index.NewSymbol(2, 2, "cmp.isNaN", index.ScopeLocal, nil, nil),
+	index.NewSymbol(1, 1, "builtin.append", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.cap", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.clear", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.close", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.complex", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.copy", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.delete", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.imag", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.len", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.make", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.max", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.min", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.new", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.panic", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.print", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.println", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.real", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "builtin.recover", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(1, 1, "(builtin.error).Error", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
+	index.NewSymbol(2, 2, "cmp.Compare", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(2, 2, "cmp.Less", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(2, 2, "cmp.Or", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+	index.NewSymbol(2, 2, "cmp.isNaN", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
 }
 
 var builtinReferences = []*index.ReferenceNames{
@@ -97,43 +98,40 @@ var _ = Describe("PackageParser", func() {
 		symbols, err := idx.GetAllSymbols()
 		log.Println(symbols)
 		Expect(err).ToNot(HaveOccurred(), "Failed to get symbols from index")
-		Expect(symbols).ToNot(BeEmpty(), "Expected symbols to be indexed, but found none")
-
-		sortedSymbols := sortedSymbols(symbols)
-
-		Expect(len(sortedSymbols)).To(Equal(len(expectedSymbols)+len(builtinSymbols)), "Expected %d symbols, but found %d", len(expectedSymbols)+len(builtinSymbols), len(sortedSymbols))
-		for i := range builtinSymbols {
-			Expect(*sortedSymbols[i]).To(index.RepresentSymbol(builtinSymbols[i]), "Symbol %v in index does not match expected symbol", i)
+		matchers := []types.GomegaMatcher{}
+		for _, ref := range expectedSymbols {
+			matchers = append(matchers, &index.SymbolMatcher{Expected: ref})
 		}
-		for i, symbol := range sortedSymbols[len(builtinSymbols):] {
-			Expect(*symbol).To(index.RepresentSymbol(expectedSymbols[i]), "Symbol %v in index does not match expected symbol", i)
-		}
+		Expect(symbols).To(ConsistOf(matchers), "Symbols in index do not match expected symbols")
 
 		references, err := idx.GetAllReferencesNames()
 		Expect(err).ToNot(HaveOccurred(), "Failed to get references from index")
-		var matchers []types.GomegaMatcher
+		matchers = []types.GomegaMatcher{}
 		for _, ref := range expectedReferences {
 			matchers = append(matchers, &index.ReferenceMatcher{Expected: ref})
 		}
 		Expect(references).To(ConsistOf(matchers), "References in index do not match expected references")
 	},
 		Entry("is trivial file", "mock1",
-			[]*index.Symbol{
-				index.NewSymbol(3, 3, "mock1.MockFunction", index.ScopeGlobal, nil, nil),
-			},
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "mock1.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
 			append(
 				builtinReferences,
 				index.NewReferenceNames("mock1.MockFunction", "builtin.print"),
 			),
 		),
 		Entry("is an interface call", "interface_call",
-			[]*index.Symbol{
-				index.NewSymbol(3, 3, "interface_call.MockImpl).MockFunction", index.ScopeGlobal, nil, nil),
-				index.NewSymbol(3, 3, "interface_call.CallInterface", index.ScopeGlobal, nil, nil),
-			},
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "interface_call.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
+				index.NewSymbol(3, 3, "interface_call.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "interface_call.CallInterface", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
 			append(
 				builtinReferences,
-				index.NewReferenceNames("interface_call.CallInterface", "interface_call.MockImpl).MockFunction"),
+				index.NewReferenceNames("interface_call.CallInterface", "interface_call.Mock).MockFunction"),
 				index.NewReferenceNames("interface_call.MockImpl).MockFunction", "builtin.print"),
 			),
 		),

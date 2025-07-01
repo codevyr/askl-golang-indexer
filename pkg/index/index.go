@@ -182,9 +182,9 @@ type SymbolType int
 
 func (s SymbolType) String() string {
 	switch s {
-	case ScopeDeclaration:
+	case SymbolTypeDeclaration:
 		return "declaration"
-	case ScopeDefinition:
+	case SymbolTypeDefinition:
 		return "definition"
 	default:
 		return "unknown"
@@ -192,8 +192,8 @@ func (s SymbolType) String() string {
 }
 
 const (
-	ScopeDeclaration SymbolType = iota
-	ScopeDefinition
+	SymbolTypeDeclaration SymbolType = iota
+	SymbolTypeDefinition
 )
 
 type SymbolId int
@@ -212,7 +212,7 @@ type Index interface {
 	AddModule(moduleName string) (ModuleId, error)
 	AddFile(moduleId ModuleId, pkgDir, path string) (FileId, error)
 
-	AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, start token.Position, end token.Position) (SymbolId, DeclarationId, error)
+	AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, DeclarationId, error)
 	GetAllSymbols() ([]Symbol, error)
 
 	AddReference(from DeclarationId, to token.Position, toName string, start token.Position, end token.Position)
