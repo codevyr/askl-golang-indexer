@@ -20,12 +20,12 @@ type Parsable interface {
 
 type PackageParser struct {
 	pkg   *packages.Package
-	index *index.Index
+	index index.Index
 }
 
 var _ Parsable = &PackageParser{}
 
-func NewPackageParser(pkg *packages.Package, index *index.Index) *PackageParser {
+func NewPackageParser(pkg *packages.Package, index index.Index) *PackageParser {
 	return &PackageParser{
 		pkg:   pkg,
 		index: index,
@@ -38,6 +38,7 @@ func (p *PackageParser) Parse(parser *Parser) error {
 		return fmt.Errorf("not all files in a package have been parsed")
 	}
 
+	log.Printf("Parsing package %s (%s) with %d files", p.pkg.Name, p.pkg.PkgPath, len(p.pkg.CompiledGoFiles))
 	for i, file := range p.pkg.CompiledGoFiles {
 		fileParser, err := NewFileParser(parser, p.pkg, file, p.pkg.Syntax[i], p.index)
 		if err != nil {
@@ -70,12 +71,12 @@ type FileParser struct {
 	moduleId index.ModuleId
 	ast      *ast.File
 	pkg      *packages.Package
-	index    *index.Index
+	index    index.Index
 }
 
 var _ Parsable = &FileParser{}
 
-func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *ast.File, index *index.Index) (*FileParser, error) {
+func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *ast.File, index index.Index) (*FileParser, error) {
 	moduleId, err := index.AddModule(pkg.PkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module: %w", err)
@@ -244,19 +245,17 @@ func (p *FileParser) GetId() (string, bool) {
 }
 
 type Parser struct {
-	modulePath     string
 	packagePath    string
-	index          *index.Index
+	index          index.Index
 	parsedPackaged map[string]bool
 	channel        chan Parsable
 	wg             sync.WaitGroup
 }
 
-func NewParser(modulePath, packagePath string, index *index.Index) *Parser {
+func NewParser(packagePath string, index index.Index) *Parser {
 	c := make(chan Parsable)
 
 	p := &Parser{
-		modulePath:     modulePath,
 		packagePath:    packagePath,
 		index:          index,
 		parsedPackaged: make(map[string]bool),
@@ -283,6 +282,7 @@ func (p *Parser) AddPackages() error {
 
 	// pkgs now contains package metadata, ASTs, type info, etc.
 	for _, pkg := range pkgs {
+		log.Printf("Found package: '%+v' %v", pkg, pkg.Dir)
 		err := p.Parse(NewPackageParser(pkg, p.index))
 		if err != nil {
 			return err

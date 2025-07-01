@@ -57,7 +57,7 @@ const (
 )
 
 func parseModule(flags Flags, packageType ModuleType) error {
-	index, err := index.NewIndex(
+	index, err := index.NewSqlIndex(
 		index.WithIndexPath(flags.indexPath),
 		index.WithRecreate(true),
 		index.WithJournal(index.JournalModeOff),
@@ -75,7 +75,7 @@ func parseModule(flags Flags, packageType ModuleType) error {
 
 	log.Printf("Module path: %v Package path %v", module.Module.Mod.Path, flags.packagePath)
 
-	parser := parser.NewParser(module.Module.Mod.Path, flags.packagePath, index)
+	parser := parser.NewParser(flags.packagePath, index)
 	defer parser.Close()
 
 	err = parser.AddPackages()
