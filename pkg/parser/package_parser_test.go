@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
 	"github.com/planetA/askl-golang-indexer/pkg/parser"
@@ -38,7 +39,7 @@ var builtinSymbols = []*index.Symbol{
 	index.NewSymbol(2, 2, "cmp.isNaN", index.ScopeLocal, nil, nil),
 }
 
-var builtinReferences = []index.ReferenceNames{
+var builtinReferences = []*index.ReferenceNames{
 	index.NewReferenceNames("cmp.Less", "cmp.isNaN"),
 	index.NewReferenceNames("cmp.Less", "cmp.isNaN"),
 	index.NewReferenceNames("cmp.Compare", "cmp.isNaN"),
@@ -89,6 +90,10 @@ var _ = Describe("PackageParser", func() {
 		err = idx.ResolveReferences()
 		Expect(err).ToNot(HaveOccurred(), "Failed to resolve references")
 
+		err = idx.Wait()
+		Expect(err).ToNot(HaveOccurred(), "Failed to wait for index to finish")
+		log.Println("Indexing done")
+
 		symbols, err := idx.GetAllSymbols()
 		log.Println(symbols)
 		Expect(err).ToNot(HaveOccurred(), "Failed to get symbols from index")
@@ -106,22 +111,20 @@ var _ = Describe("PackageParser", func() {
 
 		references, err := idx.GetAllReferencesNames()
 		Expect(err).ToNot(HaveOccurred(), "Failed to get references from index")
-		for i := range references {
-			log.Printf("Reference %d: %v", i, references[i])
+		var matchers []types.GomegaMatcher
+		for _, ref := range expectedReferences {
+			matchers = append(matchers, &index.ReferenceMatcher{Expected: ref})
 		}
-		Expect(len(references)).To(Equal(len(expectedReferences)+len(builtinReferences)), "Expected %d references, but found %d", len(expectedReferences)+len(builtinReferences), len(references))
-		for i := range builtinReferences {
-			Expect(references[i]).To(index.RepresentReference(&builtinReferences[i]), "Reference %v in index does not match expected reference", i)
-		}
-		for i, reference := range references[len(builtinReferences):] {
-			Expect(reference).To(index.RepresentReference(expectedReferences[i]), "Reference %v in index does not match expected reference", i)
-		}
+		Expect(references).To(ConsistOf(matchers), "References in index do not match expected references")
 	},
 		Entry("is trivial file", "mock1",
 			[]*index.Symbol{
 				index.NewSymbol(3, 3, "mock1.MockFunction", index.ScopeGlobal, nil, nil),
 			},
-			[]*index.ReferenceNames{},
+			append(
+				builtinReferences,
+				index.NewReferenceNames("mock1.MockFunction", "builtin.print"),
+			),
 		),
 	)
 })

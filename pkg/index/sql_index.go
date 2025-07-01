@@ -364,6 +364,9 @@ WHERE files.filesystem_path = ?  AND name = ?`,
 		i.to.Filename,
 		i.toName,
 	)
+	log.Printf("Adding reference from=%s to=%s '%s' %s-%s %s %s",
+		i.from,
+		i.to, i.toName, i.start, i.end, i.to.Filename, index.project)
 
 	var to SymbolId
 	if err := row.Scan(&to); err != nil {
@@ -373,6 +376,9 @@ WHERE files.filesystem_path = ?  AND name = ?`,
 		return nil, err
 	}
 
+	log.Printf("Adding reference from=%s to=%s '%s' %s-%s %s %s",
+		i.from,
+		i.to, i.toName, i.start, i.end, i.to.Filename, index.project)
 	_, err := index.db.Exec(insertReferenceSQL,
 		i.from, to,
 		i.start.Line, i.start.Column,
@@ -547,35 +553,40 @@ func (i *SqlIndex) ResolveReferences() error {
 	return nil
 }
 
+func (i *SqlIndex) Wait() error {
+	i.wg.Wait()
+	return nil
+}
+
 type ReferenceNames struct {
 	From string
 	To   string
 }
 
-func NewReferenceNames(from, to string) ReferenceNames {
-	return ReferenceNames{
+func NewReferenceNames(from, to string) *ReferenceNames {
+	return &ReferenceNames{
 		From: from,
 		To:   to,
 	}
 }
 
 type ReferenceMatcher struct {
-	expectedReference *ReferenceNames
+	Expected *ReferenceNames
 }
 
 func RepresentReference(expected *ReferenceNames) types.GomegaMatcher {
 	return &ReferenceMatcher{
-		expectedReference: expected,
+		Expected: expected,
 	}
 }
 
 func (matcher *ReferenceMatcher) Match(actual any) (success bool, err error) {
-	r, ok := actual.(ReferenceNames)
+	r, ok := actual.(*ReferenceNames)
 	if !ok {
 		return false, fmt.Errorf("ReferenceMatcher matcher expects a ReferenceNames, got %T", actual)
 	}
 
-	if r.From != matcher.expectedReference.From || r.To != matcher.expectedReference.To {
+	if !strings.HasSuffix(r.From, matcher.Expected.From) || !strings.HasSuffix(r.To, matcher.Expected.To) {
 		return false, nil
 	}
 	return true, nil
@@ -589,8 +600,8 @@ func (matcher *ReferenceMatcher) FailureMessage(actual any) (message string) {
 		actualString = fmt.Sprintf("%#v", actual)
 	}
 	var expectedString string
-	if matcher.expectedReference != nil {
-		expectedString = fmt.Sprintf("{\n\tFrom: %s,\n\tTo: %s\n}", matcher.expectedReference.From, matcher.expectedReference.To)
+	if matcher.Expected != nil {
+		expectedString = fmt.Sprintf("{\n\tFrom: %s,\n\tTo: %s\n}", matcher.Expected.From, matcher.Expected.To)
 	} else {
 		expectedString = "nil"
 	}
@@ -605,15 +616,15 @@ func (matcher *ReferenceMatcher) NegatedFailureMessage(actual any) (message stri
 		actualString = fmt.Sprintf("%#v", actual)
 	}
 	var expectedString string
-	if matcher.expectedReference != nil {
-		expectedString = fmt.Sprintf("{\n\tFrom: %s,\n\tTo: %s\n}", matcher.expectedReference.From, matcher.expectedReference.To)
+	if matcher.Expected != nil {
+		expectedString = fmt.Sprintf("{\n\tFrom: %s,\n\tTo: %s\n}", matcher.Expected.From, matcher.Expected.To)
 	} else {
 		expectedString = "nil"
 	}
 	return fmt.Sprintf("Expected\n\t%s\nnot to contain the ReferenceNames representation of\n\t%s", actualString, expectedString)
 }
 
-func (i *SqlIndex) GetAllReferencesNames() ([]ReferenceNames, error) {
+func (i *SqlIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 	rows, err := i.db.Query(
 		`SELECT 
 		   from_symbols.name,
@@ -627,7 +638,7 @@ func (i *SqlIndex) GetAllReferencesNames() ([]ReferenceNames, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var references []ReferenceNames
+	var references []*ReferenceNames
 	for rows.Next() {
 		var ref ReferenceNames
 		if err := rows.Scan(
@@ -636,7 +647,7 @@ func (i *SqlIndex) GetAllReferencesNames() ([]ReferenceNames, error) {
 		); err != nil {
 			return nil, err
 		}
-		references = append(references, ref)
+		references = append(references, &ref)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

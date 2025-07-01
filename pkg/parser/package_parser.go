@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"log"
 	"sync"
@@ -96,7 +97,7 @@ func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *
 }
 
 // Find function calls in a given FuncDecl
-func (f *FileParser) callExprParser(fn *ast.FuncDecl, declId index.DeclarationId) {
+func (f *FileParser) callExprParser(parser *Parser, fn *ast.FuncDecl, declId index.DeclarationId) {
 	if fn.Body == nil {
 		return
 	}
@@ -149,46 +150,55 @@ func (f *FileParser) callExprParser(fn *ast.FuncDecl, declId index.DeclarationId
 			default:
 				log.Fatalf("Unknown call expression type %T %s %s", fun, start, end)
 			}
+			var pos token.Position
 			obj := f.pkg.TypesInfo.ObjectOf(ident)
 			if !obj.Pos().IsValid() {
-				uniObj := types.Universe.Lookup(ident.Name)
 				log.Println("Unimplemented built in support:", call, start, end)
 				typeValue, ok := f.pkg.TypesInfo.Types[callExpr.Fun]
-				log.Printf("Object: %+v %+T TYPES VALUE %+v %v %+v", obj, obj, typeValue.IsBuiltin(), ok, uniObj.Pos().IsValid())
-				return true
-			}
-			switch obj := obj.(type) {
-			case *types.Func:
-				call = obj.FullName()
-				sig, ok := obj.Type().(*types.Signature)
 				if !ok {
-					log.Fatalf("Function %s has no signature", call)
+					log.Fatalf("Failed to find type for %s in %s", ident.Name, f.filepath)
 				}
-				if sig.Recv() != nil {
-					if _, ok := sig.Recv().Type().Underlying().(*types.Interface); ok {
-						log.Println("Unimplemented abstract interface:", obj.String(), start, end)
-						// Method in an interface, so no actual body
-						return true
-					}
-					if sig.Recv() != sig.Recv().Origin() {
-						log.Println("Unimplemented generic interface:", obj.String(), start, end)
-						return true
-					}
+				if typeValue.IsBuiltin() {
+					obj = parser.builtinPkg.Types.Scope().Lookup(ident.Name)
+					pos = parser.builtinPkg.Fset.Position(obj.Pos())
+					call = obj.Id()
 				}
-			case *types.TypeName:
-				log.Println("Unimplemented:", obj.String(), start, end)
-				return true
-			case *types.Var:
-				log.Println("Unimplemented:", obj.String(), start, end)
-				return true
-			case *types.Builtin:
-				log.Println("Unimplemented:", obj.String(), start, end)
-				return true
-			default:
-				log.Panicf("Unimplemented %+T", obj)
+				log.Printf("Object: %+v %+T TYPES VALUE %+v %v %+v call %s", obj, obj, typeValue.IsBuiltin(), ok, obj.Pos().IsValid(), call)
+			} else {
+				switch obj := obj.(type) {
+				case *types.Func:
+					call = obj.FullName()
+					sig, ok := obj.Type().(*types.Signature)
+					if !ok {
+						log.Fatalf("Function %s has no signature", call)
+					}
+					if sig.Recv() != nil {
+						if _, ok := sig.Recv().Type().Underlying().(*types.Interface); ok {
+							log.Println("Unimplemented abstract interface:", obj.String(), start, end)
+							// Method in an interface, so no actual body
+							return true
+						}
+						if sig.Recv() != sig.Recv().Origin() {
+							log.Println("Unimplemented generic interface:", obj.String(), start, end)
+							return true
+						}
+					}
+				case *types.TypeName:
+					log.Println("Unimplemented:", obj.String(), start, end)
+					return true
+				case *types.Var:
+					log.Println("Unimplemented:", obj.String(), start, end)
+					return true
+				case *types.Builtin:
+					log.Println("Unimplemented:", obj.String(), start, end)
+					return true
+				default:
+					log.Panicf("Unimplemented %+T", obj)
+				}
+				pos = f.pkg.Fset.Position(obj.Pos())
 			}
-			pos := f.pkg.Fset.Position(obj.Pos())
 
+			log.Printf("Found call %s", obj.Name())
 			f.index.AddReference(declId, pos, call, start, end)
 		}
 		return true
@@ -208,7 +218,7 @@ func GetSymbolScope(name string) index.SymbolScope {
 	return index.ScopeLocal
 }
 
-func (f *FileParser) funcDeclParser(n ast.Node) bool {
+func (f *FileParser) funcDeclParser(parser *Parser, n ast.Node) bool {
 	// Check if the node is a function declaration
 	if fn, ok := n.(*ast.FuncDecl); ok {
 		obj, ok := f.pkg.TypesInfo.Defs[fn.Name]
@@ -227,7 +237,7 @@ func (f *FileParser) funcDeclParser(n ast.Node) bool {
 			log.Fatalf("Failed to add symbol: %s", err)
 		}
 
-		f.callExprParser(fn, declId)
+		f.callExprParser(parser, fn, declId)
 	}
 	return true
 }
@@ -235,7 +245,7 @@ func (f *FileParser) funcDeclParser(n ast.Node) bool {
 func (f *FileParser) Parse(parser *Parser) error {
 
 	ast.Inspect(f.ast, func(n ast.Node) bool {
-		return f.funcDeclParser(n)
+		return f.funcDeclParser(parser, n)
 	})
 
 	return nil
@@ -246,7 +256,7 @@ func (p *FileParser) GetId() (string, bool) {
 }
 
 type Parser struct {
-	builtinPkg *types.Package
+	builtinPkg *packages.Package
 
 	packagePath    string
 	index          index.Index
@@ -286,6 +296,7 @@ func (p *Parser) AddPackages() error {
 	if len(pkgs) != 1 {
 		return fmt.Errorf("expected one builtin package, got %d", len(pkgs))
 	}
+	p.builtinPkg = pkgs[0]
 	err = p.Parse(NewPackageParser(pkgs[0], p.index))
 	if err != nil {
 		return err
