@@ -246,9 +246,7 @@ WHERE files.filesystem_path = ?  AND name = ?`,
 	)
 
 	var to SymbolId
-	if err := row.Scan(&to); err == nil {
-		log.Printf("Found symbol %+v", to)
-	} else {
+	if err := row.Scan(&to); err != nil {
 		log.Printf("Not Found symbol from=%s '%s' %s-%s %s %s",
 			i.from,
 			i.to, i.start, i.end, i.toName, err)
@@ -268,6 +266,8 @@ WHERE files.filesystem_path = ?  AND name = ?`,
 }
 
 type SqlIndex struct {
+	mu sync.Mutex
+
 	project string
 	db      *sql.DB
 	channel chan IndexItem
@@ -400,6 +400,9 @@ INNER JOIN symbols ON symbols.id = declarations.symbol)`,
 }
 
 func (i *SqlIndex) AddReference(from DeclarationId, to token.Position, toName string, start token.Position, end token.Position) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
 	i.referencesLog = append(i.referencesLog,
 		&Reference{
 			IndexItemNoResp: NewIndexItemNoResp(),

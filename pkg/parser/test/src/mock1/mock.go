@@ -1,5 +1,7 @@
 package mock1
 
+import "log"
+
 func MockFunction() {
-	println("Hello, World!")
+	log.Println("Hello, World!")
 }
