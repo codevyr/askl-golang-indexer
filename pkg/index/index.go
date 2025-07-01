@@ -56,6 +56,18 @@ func WithJournal(mode JournalMode) Option {
 	}
 }
 
+type CacheMode string
+
+const (
+	CacheModeShared CacheMode = "shared"
+)
+
+func WithCache(mode CacheMode) Option {
+	return &indexPathOption{
+		extraSqliteArgs: fmt.Sprintf("cache=%s", mode),
+	}
+}
+
 type SynchronousMode string
 
 const (

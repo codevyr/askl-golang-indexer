@@ -17,7 +17,8 @@ var _ = Describe("PackageParser", func() {
 	BeforeEach(func() {
 		var err error
 		idx, err = index.NewSqlIndex(
-			index.WithIndexPath(":memory:"),
+			index.WithIndexPath("file::memory:"),
+			index.WithCache(index.CacheModeShared),
 			index.WithProject("test_project"),
 			index.WithRecreate(true),
 		)
