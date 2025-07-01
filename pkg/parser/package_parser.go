@@ -65,7 +65,6 @@ func (p *PackageParser) GetId() (string, bool) {
 }
 
 type FileParser struct {
-	parser   *Parser
 	filepath string
 	fileId   index.FileId
 	moduleId index.ModuleId
@@ -87,7 +86,6 @@ func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *
 	}
 
 	return &FileParser{
-		parser:   parser,
 		filepath: filepath,
 		ast:      ast,
 		pkg:      pkg,
@@ -301,8 +299,9 @@ func (p *Parser) Wait() {
 	p.wg.Wait()
 }
 
-func (p *Parser) Close() {
+func (p *Parser) Close() error {
 	close(p.channel)
+	return nil
 }
 
 func (p *Parser) Parse(item Parsable) error {

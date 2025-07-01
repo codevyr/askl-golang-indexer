@@ -28,7 +28,7 @@ var _ = Describe("PackageParser", func() {
 		err := idx.Close()
 		Expect(err).ToNot(HaveOccurred(), "Failed to close index")
 	})
-	DescribeTable("Parsing a package", func(testDir string) {
+	DescribeTable("Parsing a package", func(testDir string, expectedSymbols []*index.Symbol) {
 		cwd, err := os.Getwd()
 		Expect(err).ToNot(HaveOccurred(), "Failed to get current working directory")
 		pkgPath := fmt.Sprintf("%s/test/src/%s", cwd, testDir)
@@ -49,7 +49,13 @@ var _ = Describe("PackageParser", func() {
 		log.Println(symbols)
 		Expect(err).ToNot(HaveOccurred(), "Failed to get symbols from index")
 		Expect(symbols).ToNot(BeEmpty(), "Expected symbols to be indexed, but found none")
+
+		for i, symbol := range symbols {
+			Expect(symbol).To(index.RepresentSymbol(expectedSymbols[i]), "Symbol %v in index does not match expected symbol", i)
+		}
 	},
-		Entry("with a valid package", "mock1"),
+		Entry("trivial file", "mock1", []*index.Symbol{
+			index.NewSymbol(1, 1, "mock1.MockFunction", index.ScopeGlobal, nil, nil),
+		}),
 	)
 })

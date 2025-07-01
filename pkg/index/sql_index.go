@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/onsi/gomega/types"
 )
 
 var (
@@ -143,6 +144,27 @@ type Symbol struct {
 
 var _ IndexItem = &Symbol{}
 
+func NewSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, start *token.Position, end *token.Position) *Symbol {
+	s := &Symbol{
+		IndexItemWithResp: NewIndexItemWithResp(),
+		moduleId:          moduleId,
+		fileId:            fileId,
+		name:              name,
+		scope:             scope,
+	}
+	if start != nil {
+		s.start = *start
+	} else {
+		s.start = token.Position{Line: 0, Column: 0}
+	}
+	if end != nil {
+		s.end = *end
+	} else {
+		s.end = token.Position{Line: 0, Column: 0}
+	}
+	return s
+}
+
 func (s *Symbol) getSymbolId(index *SqlIndex) (SymbolId, error) {
 
 	row := index.db.QueryRow(selectSymbolSQL, s.name, s.moduleId, s.scope)
@@ -213,6 +235,79 @@ func (s *Symbol) handle(index *SqlIndex) (interface{}, error) {
 		symbolId:      symbolId,
 		declarationId: DeclarationId(declarationIdInt),
 	}, nil
+}
+
+type SymbolMatcher struct {
+	expectedSymbols *Symbol
+}
+
+func RepresentSymbol(expected *Symbol) types.GomegaMatcher {
+	return &SymbolMatcher{
+		expectedSymbols: expected,
+	}
+}
+
+func (matcher *SymbolMatcher) Match(actual any) (success bool, err error) {
+	s, ok := actual.(Symbol)
+	if !ok {
+		return false, fmt.Errorf("SymbolMatcher matcher expects a Symbol, got %T", actual)
+	}
+
+	rest := s.moduleId == matcher.expectedSymbols.moduleId &&
+		s.fileId == matcher.expectedSymbols.fileId &&
+		strings.HasSuffix(s.name, matcher.expectedSymbols.name) &&
+		s.scope == matcher.expectedSymbols.scope
+	if !rest {
+		return false, nil
+	}
+
+	zeroPosition := token.Position{Line: 0, Column: 0}
+	if matcher.expectedSymbols.start == zeroPosition && matcher.expectedSymbols.end == zeroPosition {
+		return true, nil
+	}
+
+	return s.start == matcher.expectedSymbols.start &&
+		s.end == matcher.expectedSymbols.end, nil
+}
+
+func (matcher *SymbolMatcher) FailureMessage(actual any) (message string) {
+	var actualString string
+	if s, ok := actual.(Symbol); ok {
+		actualString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
+			s.moduleId, s.fileId, s.name, s.scope, s.start, s.end)
+	} else {
+		actualString = fmt.Sprintf("%#v", actual)
+	}
+
+	var expectedString string
+	if matcher.expectedSymbols != nil {
+		expectedString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
+			matcher.expectedSymbols.moduleId, matcher.expectedSymbols.fileId, matcher.expectedSymbols.name,
+			matcher.expectedSymbols.scope, matcher.expectedSymbols.start, matcher.expectedSymbols.end)
+	} else {
+		expectedString = "nil"
+	}
+	return fmt.Sprintf("Expected\n\t%s\nto contain the Symbol representation of\n\t%s", actualString, expectedString)
+}
+
+func (matcher *SymbolMatcher) NegatedFailureMessage(actual any) (message string) {
+	var actualString string
+	if s, ok := actual.(Symbol); ok {
+		actualString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
+			s.moduleId, s.fileId, s.name, s.scope, s.start, s.end)
+	} else {
+		actualString = fmt.Sprintf("%#v", actual)
+	}
+
+	var expectedString string
+	if matcher.expectedSymbols != nil {
+		expectedString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
+			matcher.expectedSymbols.moduleId, matcher.expectedSymbols.fileId, matcher.expectedSymbols.name,
+			matcher.expectedSymbols.scope, matcher.expectedSymbols.start, matcher.expectedSymbols.end)
+	} else {
+		expectedString = "nil"
+	}
+	return fmt.Sprintf("Expected\n\t%s\nnot to contain the Symbol representation of\n\t%s", actualString, expectedString)
 }
 
 type Reference struct {
