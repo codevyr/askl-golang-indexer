@@ -12,6 +12,7 @@ import (
 	"golang.org/x/mod/modfile"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
+	"github.com/planetA/askl-golang-indexer/pkg/parser"
 )
 
 func getModulePath(packagePath string) (*modfile.File, error) {
@@ -74,7 +75,7 @@ func parseModule(flags Flags, packageType ModuleType) error {
 
 	log.Printf("Module path: %v Package path %v", module.Module.Mod.Path, flags.packagePath)
 
-	parser := NewParser(module.Module.Mod.Path, flags.packagePath, index)
+	parser := parser.NewParser(module.Module.Mod.Path, flags.packagePath, index)
 	defer parser.Close()
 
 	err = parser.AddPackages()
