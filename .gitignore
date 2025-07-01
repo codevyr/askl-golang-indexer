@@ -1,4 +1,7 @@
 /gomod2nix-template
 .envrc
 .direnv
-index.db
+*.db
+*.prof
+*.log
+*.test
