@@ -217,5 +217,7 @@ type Index interface {
 
 	AddReference(from DeclarationId, to token.Position, toName string, start token.Position, end token.Position)
 	ResolveReferences() error
+	GetAllReferencesNames() ([]ReferenceNames, error)
+
 	Close() error
 }

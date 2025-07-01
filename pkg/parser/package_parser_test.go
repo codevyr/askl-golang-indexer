@@ -53,6 +53,13 @@ var _ = Describe("PackageParser", func() {
 		for i, symbol := range symbols {
 			Expect(symbol).To(index.RepresentSymbol(expectedSymbols[i]), "Symbol %v in index does not match expected symbol", i)
 		}
+
+		references, err := idx.GetAllReferencesNames()
+		Expect(err).ToNot(HaveOccurred(), "Failed to get references from index")
+		log.Printf("Parsed package %s with %d symbols and %d references", testDir, len(symbols), len(references))
+		for _, ref := range references {
+			Expect(ref).ToNot(BeEmpty(), "Reference name should not be empty")
+		}
 	},
 		Entry("trivial file", "mock1", []*index.Symbol{
 			index.NewSymbol(1, 1, "mock1.MockFunction", index.ScopeGlobal, nil, nil),

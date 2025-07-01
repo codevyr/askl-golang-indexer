@@ -522,6 +522,43 @@ func (i *SqlIndex) ResolveReferences() error {
 	return nil
 }
 
+type ReferenceNames struct {
+	From string
+	To   string
+}
+
+func (i *SqlIndex) GetAllReferencesNames() ([]ReferenceNames, error) {
+	rows, err := i.db.Query(
+		`SELECT 
+		   from_symbols.name,
+		   to_symbols.name
+		 FROM (((symbol_refs
+		  INNER JOIN symbols AS to_symbols ON symbol_refs.to_symbol = to_symbols.id)
+		   INNER JOIN declarations ON symbol_refs.from_decl = declarations.id)
+		    INNER JOIN symbols AS from_symbols ON from_symbols.id = declarations.symbol)`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var references []ReferenceNames
+	for rows.Next() {
+		var ref ReferenceNames
+		if err := rows.Scan(
+			&ref.From,
+			&ref.To,
+		); err != nil {
+			return nil, err
+		}
+		references = append(references, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	log.Printf("GetAllReferences: Queried %d references", len(references))
+	return references, nil
+}
+
 func (i *SqlIndex) loop() {
 	for message := range i.channel {
 		Handle(message, i)
