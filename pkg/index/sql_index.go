@@ -37,6 +37,9 @@ var (
 	//go:embed sql/select_declaration.sql
 	selectDeclarationSQL string
 
+	//go:embed sql/find_declaration.sql
+	findDeclarationSQL string
+
 	//go:embed sql/insert_declaration.sql
 	insertDeclarationSQL string
 
@@ -475,8 +478,8 @@ func (i *SqlIndex) AddFile(moduleId ModuleId, pkgDir, path string) (FileId, erro
 func (i *SqlIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, DeclarationId, error) {
 	i.wg.Add(1)
 
-	log.Printf("AddSymbol: moduleId=%d, fileId=%d, name=%s, scope=%s, start=%v, end=%v",
-		moduleId, fileId, name, scope, start, end)
+	log.Printf("AddSymbol: moduleId=%d, fileId=%d, name=%s, scope=%s, symbolType=%s, start=%v, end=%v",
+		moduleId, fileId, name, scope, symbolType, start, end)
 	s := &Symbol{
 		IndexItemWithResp: NewIndexItemWithResp(),
 		fileId:            fileId,
@@ -495,6 +498,47 @@ func (i *SqlIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scop
 	symResp := resp.val.(SymbolResp)
 
 	return symResp.symbolId, symResp.declarationId, resp.err
+}
+
+func (i *SqlIndex) FindSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, DeclarationId, error) {
+	log.Printf("FindSymbol: moduleId=%d, fileId=%d, name=%s, scope=%s, symbolType=%s",
+		moduleId, fileId, name, scope, symbolType)
+	rows, err := i.db.Query(findDeclarationSQL, moduleId, fileId, name, scope, symbolType)
+	if err != nil {
+		return SymbolId(-1), DeclarationId(-1), err
+	}
+	defer rows.Close()
+
+	log.Printf("FindSymbol: found %v", i.db.Stats())
+
+	var results []struct {
+		symbolId      SymbolId
+		declarationId DeclarationId
+	}
+	for rows.Next() {
+		var symbolId SymbolId
+		var declarationId DeclarationId
+		if err := rows.Scan(&symbolId, &declarationId); err != nil {
+			return SymbolId(-1), DeclarationId(-1), err
+		}
+		results = append(results, struct {
+			symbolId      SymbolId
+			declarationId DeclarationId
+		}{
+			symbolId:      symbolId,
+			declarationId: declarationId,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return SymbolId(-1), DeclarationId(-1), err
+	}
+
+	if len(results) != 1 {
+		log.Printf("FindSymbol: expected 1 symbol, found %d", len(results))
+		return SymbolId(-1), DeclarationId(-1), fmt.Errorf("expected 1 symbol, found %d", len(results))
+	}
+
+	return results[0].symbolId, results[0].declarationId, nil
 }
 
 func (i *SqlIndex) GetAllSymbols() ([]Symbol, error) {

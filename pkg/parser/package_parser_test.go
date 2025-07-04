@@ -132,6 +132,7 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinReferences,
 				index.NewReferenceNames("interface_call.CallInterface", "interface_call.Mock).MockFunction"),
+				index.NewReferenceNames("interface_call.Mock).MockFunction", "interface_call.MockImpl).MockFunction"),
 				index.NewReferenceNames("interface_call.MockImpl).MockFunction", "builtin.print"),
 			),
 		),
