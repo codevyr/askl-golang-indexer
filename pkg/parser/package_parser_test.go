@@ -136,5 +136,19 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("interface_call.MockImpl).MockFunction", "builtin.print"),
 			),
 		),
+		Entry("is an interface call", "interface_call2",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "interface_call.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
+				index.NewSymbol(3, 3, "interface_call.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "interface_call.CallInterface", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("interface_call.CallInterface", "interface_call.Mock).MockFunction"),
+				index.NewReferenceNames("interface_call.Mock).MockFunction", "interface_call.MockImpl).MockFunction"),
+				index.NewReferenceNames("interface_call.MockImpl).MockFunction", "builtin.print"),
+			),
+		),
 	)
 })
