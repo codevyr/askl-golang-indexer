@@ -175,10 +175,6 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 						log.Fatalf("Function %s has no signature", call)
 					}
 					if sig.Recv() != nil {
-						if _, ok := sig.Recv().Type().Underlying().(*types.Interface); ok {
-							log.Println("Unimplemented abstract interface:", obj.String(), start, end)
-							// Method in an interface, so no actual body
-						}
 						if sig.Recv() != sig.Recv().Origin() {
 							log.Println("Unimplemented generic interface:", obj.String(), start, end)
 							return true
