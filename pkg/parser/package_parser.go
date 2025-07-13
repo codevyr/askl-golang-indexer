@@ -5,9 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
-	"iter"
 	"log"
-	"sync"
 	"unicode"
 
 	"golang.org/x/tools/go/packages"
@@ -16,25 +14,29 @@ import (
 )
 
 type Parsable interface {
-	Parse(parser *Parser) error
+	Parse(parser *ParsingStage) error
 	GetId() (string, bool)
 }
 
+type ParserConstructor func(*Parser, *packages.Package, index.Index) Parsable
+
 type PackageParser struct {
-	pkg   *packages.Package
-	index index.Index
+	parser *Parser
+	pkg    *packages.Package
+	index  index.Index
 }
 
 var _ Parsable = &PackageParser{}
 
-func NewPackageParser(pkg *packages.Package, index index.Index) *PackageParser {
+func NewPackageParser(p *Parser, pkg *packages.Package, index index.Index) Parsable {
 	return &PackageParser{
-		pkg:   pkg,
-		index: index,
+		parser: p,
+		pkg:    pkg,
+		index:  index,
 	}
 }
 
-func (p *PackageParser) Parse(parser *Parser) error {
+func (p *PackageParser) Parse(parser *ParsingStage) error {
 	if len(p.pkg.CompiledGoFiles) != len(p.pkg.Syntax) {
 		log.Println(p.pkg.CompiledGoFiles, p.pkg.Syntax)
 		return fmt.Errorf("not all files in a package have been parsed")
@@ -53,7 +55,7 @@ func (p *PackageParser) Parse(parser *Parser) error {
 	}
 
 	for _, importedPkg := range p.pkg.Imports {
-		err := parser.Parse(NewPackageParser(importedPkg, p.index))
+		err := parser.Parse(NewPackageParser(p.parser, importedPkg, p.index))
 		if err != nil {
 			return err
 		}
@@ -77,7 +79,7 @@ type FileParser struct {
 
 var _ Parsable = &FileParser{}
 
-func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *ast.File, index index.Index) (*FileParser, error) {
+func NewFileParser(parser *ParsingStage, pkg *packages.Package, filepath string, ast *ast.File, index index.Index) (*FileParser, error) {
 	moduleId, err := index.AddModule(pkg.PkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module: %w", err)
@@ -98,7 +100,7 @@ func NewFileParser(parser *Parser, pkg *packages.Package, filepath string, ast *
 }
 
 // Find function calls in a given FuncDecl
-func (f *FileParser) functionBodyParser(parser *Parser, fn *ast.FuncDecl, declId index.DeclarationId) (err error) {
+func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, declId index.DeclarationId) (err error) {
 	if fn.Body == nil {
 		return
 	}
@@ -160,8 +162,8 @@ func (f *FileParser) functionBodyParser(parser *Parser, fn *ast.FuncDecl, declId
 					log.Fatalf("Failed to find type for %s in %s", ident.Name, f.filepath)
 				}
 				if typeValue.IsBuiltin() {
-					obj = parser.builtinPkg.Types.Scope().Lookup(ident.Name)
-					pos = parser.builtinPkg.Fset.Position(obj.Pos())
+					obj = parser.parser.builtinPkg.Types.Scope().Lookup(ident.Name)
+					pos = parser.parser.builtinPkg.Fset.Position(obj.Pos())
 					call = obj.Id()
 				}
 			} else {
@@ -219,7 +221,7 @@ func GetSymbolScope(name string) index.SymbolScope {
 	return index.ScopeLocal
 }
 
-func (f *FileParser) funcDeclParser(parser *Parser, fn *ast.FuncDecl) bool {
+func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) bool {
 	// Check if the node is a function declaration
 	obj, ok := f.pkg.TypesInfo.Defs[fn.Name]
 	if !ok {
@@ -241,7 +243,7 @@ func (f *FileParser) funcDeclParser(parser *Parser, fn *ast.FuncDecl) bool {
 	return true
 }
 
-func (f *FileParser) typeSpecParser(parser *Parser, ts *ast.TypeSpec) bool {
+func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec) bool {
 	if ts.Name == nil {
 		log.Println("Skipping type spec with no name")
 		return false
@@ -284,116 +286,7 @@ func (f *FileParser) typeSpecParser(parser *Parser, ts *ast.TypeSpec) bool {
 	}
 }
 
-func (f *FileParser) createInterfaceReferences(lhsMethods, rhsMethods iter.Seq[*types.Func]) {
-
-	for lhsMethod := range lhsMethods {
-		log.Printf("Processing left-hand side method: %s", lhsMethod.Name())
-		for rhsMethod := range rhsMethods {
-			log.Printf("Processing right-hand side method: %s", rhsMethod.Name())
-			if lhsMethod.Name() == rhsMethod.Name() {
-				fullName := lhsMethod.FullName()
-				symbolScope := GetSymbolScope(lhsMethod.Name())
-				start := f.pkg.Fset.Position(lhsMethod.Pos())
-				end := f.pkg.Fset.Position(lhsMethod.Pos())
-
-				log.Print("Adding symbol for interface method ", fullName, " scope ", symbolScope, " start ", start, " end ", end)
-
-				_, declId, err := f.index.FindSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeDeclaration)
-				if err != nil {
-					log.Fatalf("Failed to find symbol: %s", err)
-				}
-
-				log.Printf("Connecting interface method %s to implementation %s", lhsMethod.Name(), rhsMethod.Name())
-				f.index.AddReference(declId, f.pkg.Fset.Position(lhsMethod.Pos()), rhsMethod.FullName(), start, end)
-			}
-		}
-	}
-}
-
-func (f *FileParser) connectInterfaceToImplementation(lhs *types.Interface, lhsIdx int, lhsLen int, allRhs []ast.Expr) error {
-	if len(allRhs) == lhsLen {
-		rhs := allRhs[lhsIdx]
-		log.Printf("Found assign statement right-hand side: %T", rhs)
-		switch rhs := rhs.(type) {
-		case *ast.CallExpr:
-			log.Printf("Found call expression on right-hand side: %T", rhs)
-		case *ast.Ident:
-			log.Printf("Found identifier on right-hand side: %s", rhs.Name)
-		case *ast.CompositeLit:
-
-			log.Printf("Found composite literal on right-hand side: %T", rhs)
-			rhsType := f.pkg.TypesInfo.TypeOf(rhs)
-			if rhsType != nil {
-				log.Printf("Type of composite literal: %s %T", rhsType, rhsType)
-				if namedType, ok := rhsType.(*types.Named); ok {
-					log.Printf("Composite literal is of named type: %s", namedType.Obj().Name())
-					if namedType.Underlying() != nil {
-						log.Printf("Underlying type of named type: %s", namedType.Underlying())
-					}
-					log.Printf("Named type has methods: %v", namedType.Methods())
-					f.createInterfaceReferences(lhs.Methods(), namedType.Methods())
-				}
-			} else {
-				log.Printf("Composite literal has no type information")
-			}
-		case *ast.BasicLit:
-			log.Printf("Found basic literal on right-hand side: %s", rhs.Value)
-		}
-	} else if len(allRhs) == 1 {
-		log.Printf("Found single right-hand side expression: %T", allRhs[0])
-	} else {
-		log.Printf("Found %d right-hand side expressions, expected %d", len(allRhs), lhsLen)
-		return fmt.Errorf("mismatched number of left-hand side and right-hand side expressions: %d vs %d", lhsLen, len(allRhs))
-	}
-	log.Printf("Connecting interface %s to implementation at index %d", lhs, lhsIdx)
-	return nil
-}
-
-func (f *FileParser) assignStmtParser(parser *Parser, as *ast.AssignStmt) bool {
-	if len(as.Lhs) == 0 {
-		log.Println("Skipping assign statement with no left-hand side")
-		return false
-	}
-	if len(as.Rhs) == 0 {
-		log.Println("Skipping assign statement with no right-hand side")
-		return false
-	}
-
-	for i, lhs := range as.Lhs {
-		log.Printf("Found assign statement left-hand side: %T", lhs)
-		var objVar *types.Var
-		switch lhs := lhs.(type) {
-		case *ast.Ident:
-			log.Printf("Assigning to identifier: %s", lhs.Name)
-
-			if obj, ok := f.pkg.TypesInfo.Defs[lhs]; ok {
-				objVar = obj.(*types.Var)
-				log.Printf("Full name of identifier: %s", objVar)
-			} else if obj, ok := f.pkg.TypesInfo.Uses[lhs]; ok {
-				objVar = obj.(*types.Var)
-				log.Printf("Full name of identifier: %s", objVar)
-			} else {
-				log.Panicf("Expected to find definition for identifier %s", lhs.Name)
-			}
-
-			varType, ok := objVar.Type().Underlying().(*types.Interface)
-			if ok {
-				log.Printf("Identifier %s is an interface with methods: %v", objVar.Name(), varType.Methods())
-			} else {
-				log.Printf("Identifier %s is of type: %s", objVar.Name(), objVar.Type())
-			}
-
-			err := f.connectInterfaceToImplementation(varType, i, len(as.Lhs), as.Rhs)
-			if err != nil {
-				log.Printf("Failed to connect interface %s to implementation: %s", varType, err)
-			}
-		}
-	}
-
-	return true
-}
-
-func (f *FileParser) Parse(parser *Parser) error {
+func (f *FileParser) Parse(parser *ParsingStage) error {
 
 	ast.Inspect(f.ast, func(n ast.Node) bool {
 		switch n := n.(type) {
@@ -401,8 +294,6 @@ func (f *FileParser) Parse(parser *Parser) error {
 			return f.funcDeclParser(parser, n)
 		case *ast.TypeSpec:
 			return f.typeSpecParser(parser, n)
-		case *ast.AssignStmt:
-			return f.assignStmtParser(parser, n)
 		default:
 			return true // continue traversing
 		}
@@ -418,29 +309,30 @@ func (p *FileParser) GetId() (string, bool) {
 type Parser struct {
 	builtinPkg *packages.Package
 
-	packagePath    string
-	index          index.Index
-	parsedPackaged map[string]bool
-	channel        chan Parsable
-	wg             sync.WaitGroup
+	pkgs []*packages.Package
+
+	stages []*ParsingStage
+
+	packagePath string
+	index       index.Index
 }
 
 func NewParser(packagePath string, index index.Index) *Parser {
-	c := make(chan Parsable)
-
 	p := &Parser{
-		packagePath:    packagePath,
-		index:          index,
-		parsedPackaged: make(map[string]bool),
-		channel:        c,
+		packagePath: packagePath,
+		index:       index,
+		stages:      []*ParsingStage{},
 	}
 
-	go p.loop()
+	p.stages = append(p.stages,
+		NewParsingStage(p, "PackageParser", NewPackageParser),
+		NewParsingStage(p, "AssignmentParser", NewAssignmentStage),
+	)
 
 	return p
 }
 
-func (p *Parser) AddPackages() error {
+func (p *Parser) Load() error {
 
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.LoadImports | packages.LoadAllSyntax,
@@ -457,78 +349,42 @@ func (p *Parser) AddPackages() error {
 		return fmt.Errorf("expected one builtin package, got %d", len(pkgs))
 	}
 	p.builtinPkg = pkgs[0]
-	err = p.Parse(NewPackageParser(pkgs[0], p.index))
-	if err != nil {
-		return err
-	}
 
-	pkgs, err = packages.Load(cfg, p.packagePath)
+	p.pkgs, err = packages.Load(cfg, p.packagePath)
 	if err != nil {
 		return fmt.Errorf("failed to load a package: %w", err)
 	}
 
-	// pkgs now contains package metadata, ASTs, type info, etc.
-	for _, pkg := range pkgs {
-		log.Printf("Found package: '%+v' %v", pkg, pkg.Dir)
-		err := p.Parse(NewPackageParser(pkg, p.index))
+	return nil
+}
+
+func (p *Parser) AddPackages() error {
+
+	for _, stage := range p.stages {
+		log.Printf("Running stage: %s", stage.StageName)
+		item := stage.StageConstructor(p, p.builtinPkg, p.index)
+		err := stage.Parse(item)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to parse builtin package with stage %s: %w", stage.StageName, err)
 		}
+
+		for _, pkg := range p.pkgs {
+			log.Printf("Parsing package %s with stage %s", pkg.PkgPath, stage.StageName)
+			item := stage.StageConstructor(p, pkg, p.index)
+			err := stage.Parse(item)
+			if err != nil {
+				return fmt.Errorf("failed to parse package %s with stage %s: %w", pkg.PkgPath, stage.StageName, err)
+			}
+		}
+		stage.Wait() // Wait for all parsing to finish
+		log.Printf("Finished stage: %s", stage.StageName)
 	}
 
 	return nil
 }
 
-func (p *Parser) AddPackage(pkg *types.Package) error {
-
-	return nil
-}
-
-func (p *Parser) Wait() {
-	p.wg.Wait()
-}
-
-func (p *Parser) Close() error {
-	close(p.channel)
-	return nil
-}
-
-func (p *Parser) Parse(item Parsable) error {
-
-	p.wg.Add(1)
-	go func() { p.channel <- item }()
-
-	return nil
-}
-
-func (p *Parser) doParse(item Parsable) error {
-
-	if id, ok := item.GetId(); ok {
-		if _, ok := p.parsedPackaged[id]; ok {
-			p.wg.Done()
-
-			return nil
-		}
-
-		p.parsedPackaged[id] = true
-	}
-
-	go func() {
-		defer p.wg.Done()
-		err := item.Parse(p)
-		if err != nil {
-			log.Fatalf("failed to parse: %s", err)
-		}
-	}()
-
-	return nil
-}
-
-func (p *Parser) loop() {
-	for item := range p.channel {
-		err := p.doParse(item)
-		if err != nil {
-			log.Fatalf("failed to parse package: %v", err)
-		}
+func (p *Parser) Close() {
+	for i, _ := range p.stages {
+		p.stages[i].Close()
 	}
 }

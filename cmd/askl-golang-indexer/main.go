@@ -78,12 +78,16 @@ func parseModule(flags Flags, packageType ModuleType) error {
 	parser := parser.NewParser(flags.packagePath, index)
 	defer parser.Close()
 
+	err = parser.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load parser: %w", err)
+	}
+
 	err = parser.AddPackages()
 	if err != nil {
 		return err
 	}
 
-	parser.Wait()
 	log.Println("Parsing files done")
 
 	err = index.ResolveReferences()

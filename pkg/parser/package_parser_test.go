@@ -80,13 +80,14 @@ var _ = Describe("PackageParser", func() {
 		pkgPath := fmt.Sprintf("%s/test/src/%s", cwd, testDir)
 		Expect(pkgPath).ToNot(BeEmpty(), "Package path should not be empty")
 
-		parser := parser.NewParser(pkgPath, idx)
-		defer parser.Close()
+		pkgParser := parser.NewParser(pkgPath, idx)
+		defer pkgParser.Close()
 
-		err = parser.AddPackages()
+		err = pkgParser.Load()
+		Expect(err).ToNot(HaveOccurred(), "Failed to load parser")
+
+		err = pkgParser.AddPackages()
 		Expect(err).ToNot(HaveOccurred(), "Failed to add packages to parser")
-
-		parser.Wait()
 
 		err = idx.ResolveReferences()
 		Expect(err).ToNot(HaveOccurred(), "Failed to resolve references")
@@ -139,15 +140,15 @@ var _ = Describe("PackageParser", func() {
 		Entry("is an interface call", "interface_call2",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "interface_call.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
-				index.NewSymbol(3, 3, "interface_call.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
-				index.NewSymbol(3, 3, "interface_call.CallInterface", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "interface_call2.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
+				index.NewSymbol(3, 3, "interface_call2.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "interface_call2.CallInterface", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
 			),
 			append(
 				builtinReferences,
-				index.NewReferenceNames("interface_call.CallInterface", "interface_call.Mock).MockFunction"),
-				index.NewReferenceNames("interface_call.Mock).MockFunction", "interface_call.MockImpl).MockFunction"),
-				index.NewReferenceNames("interface_call.MockImpl).MockFunction", "builtin.print"),
+				index.NewReferenceNames("interface_call2.CallInterface", "interface_call2.Mock).MockFunction"),
+				index.NewReferenceNames("interface_call2.Mock).MockFunction", "interface_call2.MockImpl).MockFunction"),
+				index.NewReferenceNames("interface_call2.MockImpl).MockFunction", "builtin.print"),
 			),
 		),
 	)

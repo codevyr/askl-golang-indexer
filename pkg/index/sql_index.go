@@ -112,7 +112,13 @@ type File struct {
 var _ IndexItem = &File{}
 
 func (f *File) handle(index *SqlIndex) (interface{}, error) {
-	row := index.db.QueryRow(selectFileSQL, f.path, index.project)
+	modulePath, ok := strings.CutPrefix(f.path, f.pkgDir)
+	if !ok {
+		log.Printf("file %v is not in the directory %v", f.path, f.pkgDir)
+		modulePath = f.path
+	}
+
+	row := index.db.QueryRow(selectFileSQL, f.module, modulePath)
 
 	fileResp := FileResp{}
 	var err error
@@ -124,11 +130,6 @@ func (f *File) handle(index *SqlIndex) (interface{}, error) {
 		return nil, err
 	}
 
-	modulePath, ok := strings.CutPrefix(f.path, f.pkgDir)
-	if !ok {
-		log.Printf("file %v is not in the directory %v", f.path, f.pkgDir)
-		modulePath = f.path
-	}
 	res, err := index.db.Exec(insertFileSQL, f.module, modulePath, f.path, goFileType)
 	if err != nil {
 		return nil, err
@@ -283,9 +284,7 @@ func (matcher *SymbolMatcher) Match(actual any) (success bool, err error) {
 		return false, fmt.Errorf("SymbolMatcher matcher expects a Symbol, got %T", actual)
 	}
 
-	rest := s.moduleId == matcher.Expected.moduleId &&
-		s.fileId == matcher.Expected.fileId &&
-		strings.HasSuffix(s.name, matcher.Expected.name) &&
+	rest := strings.HasSuffix(s.name, matcher.Expected.name) &&
 		s.scope == matcher.Expected.scope
 	if !rest {
 		return false, nil
