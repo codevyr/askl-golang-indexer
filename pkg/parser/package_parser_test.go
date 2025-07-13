@@ -181,5 +181,33 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("interface_call4.MockImpl).MockFunction", "builtin.print"),
 			),
 		),
+		Entry("is an interface call", "interface_call5",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "interface_call5.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
+				index.NewSymbol(3, 3, "interface_call5.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "interface_call5.CallInterface", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("interface_call5.CallInterface", "interface_call5.Mock).MockFunction"),
+				index.NewReferenceNames("interface_call5.Mock).MockFunction", "interface_call5.MockImpl).MockFunction"),
+				index.NewReferenceNames("interface_call5.MockImpl).MockFunction", "builtin.print"),
+			),
+		),
+		Entry("is an interface call", "interface_call6",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "interface_call6.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
+				index.NewSymbol(3, 3, "interface_call6.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "interface_call6.CallInterface", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("interface_call6.CallInterface", "interface_call6.Mock).MockFunction"),
+				index.NewReferenceNames("interface_call6.Mock).MockFunction", "interface_call6.MockImpl).MockFunction"),
+				index.NewReferenceNames("interface_call6.MockImpl).MockFunction", "builtin.print"),
+			),
+		),
 	)
 })

@@ -156,7 +156,6 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 			var pos token.Position
 			obj := f.pkg.TypesInfo.ObjectOf(ident)
 			if !obj.Pos().IsValid() {
-				log.Println("Unimplemented built in support:", call, start, end)
 				typeValue, ok := f.pkg.TypesInfo.Types[callExpr.Fun]
 				if !ok {
 					log.Fatalf("Failed to find type for %s in %s", ident.Name, f.filepath)
@@ -217,11 +216,11 @@ func GetSymbolScope(name string) index.SymbolScope {
 	return index.ScopeLocal
 }
 
-func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) bool {
+func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (bool, error) {
 	// Check if the node is a function declaration
 	obj, ok := f.pkg.TypesInfo.Defs[fn.Name]
 	if !ok {
-		log.Panicf("Expected to find definition %s", fn.Name)
+		return false, fmt.Errorf("Expected to find definition %s", fn.Name)
 	}
 	objFunc := obj.(*types.Func)
 	fullName := objFunc.FullName()
@@ -232,11 +231,11 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) bool
 	end := f.pkg.Fset.Position(fn.End())
 	_, declId, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeDefinition, start, end)
 	if err != nil {
-		log.Fatalf("Failed to add symbol: %s", err)
+		return false, fmt.Errorf("Failed to add symbol: %s", err)
 	}
 
 	f.functionBodyParser(parser, fn, declId)
-	return true
+	return true, nil
 }
 
 func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec) bool {
@@ -282,12 +281,25 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec) bool
 	}
 }
 
-func (f *FileParser) Parse(parser *ParsingStage) error {
+func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 
 	ast.Inspect(f.ast, func(n ast.Node) bool {
+		var recurse bool
 		switch n := n.(type) {
+		case *ast.FuncLit:
+			// Print the function literal
+			log.Printf("Found function literal at %s: %T %T", f.pkg.Fset.Position(n.Pos()), n, n.Type)
+			return true // continue traversing
+		case *ast.FuncType:
+			// log.Println("Unimplemented function type parsing", n)
+			return true // continue traversing
 		case *ast.FuncDecl:
-			return f.funcDeclParser(parser, n)
+			recurse, err = f.funcDeclParser(parser, n)
+			if err != nil {
+				log.Printf("Failed to parse function declaration %s: %v", n.Name.Name, err)
+				return false // stop traversing
+			}
+			return recurse
 		case *ast.TypeSpec:
 			return f.typeSpecParser(parser, n)
 		default:

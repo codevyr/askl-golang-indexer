@@ -83,85 +83,112 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 	}
 }
 
+// Map rhs return types to lhs function return types. If rhs is a single
+// expression, check the type of the expression and try to extract the return
+// types.
+func (f *AssignmentParser) extractReturnType(rhs []ast.Expr, position, total int) (types.Type, error) {
+	if len(rhs) == 0 {
+		return nil, fmt.Errorf("no right-hand side expressions found")
+	}
+	if len(rhs) > 1 && len(rhs) != total {
+		return nil, fmt.Errorf("mismatched number of right-hand side expressions: %d vs %d", len(rhs), total)
+	}
+	if total > 1 && len(rhs) == 1 {
+		switch nestedRhs := rhs[0].(type) {
+		case *ast.CallExpr:
+			var ok bool
+			var sig *types.Signature
+			if sig, ok = f.pkg.TypesInfo.TypeOf(nestedRhs.Fun).Underlying().(*types.Signature); !ok {
+				return nil, fmt.Errorf("function being called is not a valid type: %T", nestedRhs.Fun)
+			}
+
+			funcResults := sig.Results()
+			if funcResults == nil || funcResults.Len() <= position {
+				return nil, fmt.Errorf("function has no return values or not enough return values: %d vs %d", funcResults.Len(), position)
+			}
+			targetType := funcResults.At(position).Type()
+			if targetType == nil {
+				log.Printf("Return type at index %d is nil", position)
+				return nil, fmt.Errorf("return type at index %d is nil", position)
+			}
+
+			return targetType, nil
+		default:
+			log.Printf("Found unhandled nested right-hand side expression: %T", nestedRhs)
+			return nil, fmt.Errorf("unhandled nested right-hand side expression: %T", nestedRhs)
+		}
+	}
+
+	log.Printf("Extracting return type from right-hand side expressions at position %d/%d", position, total)
+
+	currentRhs := rhs[position]
+	switch rhs := currentRhs.(type) {
+	case *ast.CallExpr: // If the right-hand side is a call expression, we need to extract the return type
+		var ok bool
+		var sig *types.Signature
+		if sig, ok = f.pkg.TypesInfo.TypeOf(rhs.Fun).Underlying().(*types.Signature); !ok {
+			return nil, fmt.Errorf("function being called is not a valid type: %T", rhs.Fun)
+		}
+
+		funcResults := sig.Results()
+		if funcResults == nil || funcResults.Len() <= position {
+			return nil, fmt.Errorf("function has no return values or not enough return values: %d vs %d", funcResults.Len(), position)
+		}
+
+		targetType := funcResults.At(position).Type()
+		if targetType == nil {
+			log.Printf("Return type at index %d is nil", position)
+			return nil, fmt.Errorf("return type at index %d is nil", position)
+		}
+
+		switch targetType.(type) {
+		case *types.Named:
+			log.Printf("Return type is a named type: %s", targetType)
+			return targetType, nil
+		default:
+			log.Printf("Return type is not a named type: %s", targetType)
+			return targetType, nil
+		}
+	case *ast.Ident:
+		return nil, fmt.Errorf("Unimplemented: identifier on right-hand side for interface assignment: %s", rhs.Name)
+	case *ast.CompositeLit:
+
+		log.Printf("Found composite literal on right-hand side: %T", rhs)
+		rhsType := f.pkg.TypesInfo.TypeOf(rhs)
+		if rhsType == nil {
+			log.Printf("Composite literal has no type information")
+			return nil, fmt.Errorf("Composite literal has no type information")
+		}
+
+		if rhsType.Underlying() != nil {
+			log.Printf("Underlying type of named type: %s", rhsType.Underlying())
+		}
+
+		return rhsType, nil
+	case *ast.BasicLit:
+		log.Printf("Found basic literal on right-hand side: %s", rhs.Value)
+		return nil, fmt.Errorf("Unimplemented: basic literal on right-hand side for interface assignment: %s", rhs.Value)
+	default:
+		log.Printf("Found unhandled right-hand side expression: %T", rhs)
+		return nil, fmt.Errorf("Unimplemented: unhandled right-hand side expression for interface assignment: %T", rhs)
+	}
+}
+
 func (f *AssignmentParser) connectInterfaceToImplementation(lhs *types.Interface, lhsIdx int, lhsLen int, allRhs []ast.Expr) error {
 	log.Printf("Connecting interface %s at index %d with %d right-hand side expressions", lhs, lhsIdx, len(allRhs))
-	if len(allRhs) == lhsLen {
-		rhs := allRhs[lhsIdx]
-		log.Printf("Found assign statement right-hand side: %T", rhs)
-		switch rhs := rhs.(type) {
-		case *ast.CallExpr:
-			log.Printf("Found call expression on right-hand side: %T", rhs)
-			return fmt.Errorf("Unimplemented: call expression on right-hand side for interface assignment: %T", rhs)
-		case *ast.Ident:
-			log.Printf("Found identifier on right-hand side: %s", rhs.Name)
-			return fmt.Errorf("Unimplemented: identifier on right-hand side for interface assignment: %s", rhs.Name)
-		case *ast.CompositeLit:
-
-			log.Printf("Found composite literal on right-hand side: %T", rhs)
-			rhsType := f.pkg.TypesInfo.TypeOf(rhs)
-			if rhsType != nil {
-				log.Printf("Type of composite literal: %s %T", rhsType, rhsType)
-				if namedType, ok := rhsType.(*types.Named); ok {
-					log.Printf("Composite literal is of named type: %s", namedType.Obj().Name())
-					if namedType.Underlying() != nil {
-						log.Printf("Underlying type of named type: %s", namedType.Underlying())
-					}
-					log.Printf("Named type has methods: %v", namedType.Methods())
-					f.createInterfaceReferences(lhs.Methods(), namedType.Methods())
-				}
-			} else {
-				log.Printf("Composite literal has no type information")
-			}
-		case *ast.BasicLit:
-			log.Printf("Found basic literal on right-hand side: %s", rhs.Value)
-			return fmt.Errorf("Unimplemented: basic literal on right-hand side for interface assignment: %s", rhs.Value)
-		default:
-			log.Printf("Found unhandled right-hand side expression: %T", rhs)
-			return fmt.Errorf("Unimplemented: unhandled right-hand side expression for interface assignment: %T", rhs)
-		}
-	} else if len(allRhs) == 1 {
-		log.Printf("Found single right-hand side expression: %T", allRhs[0])
-		switch rhs := allRhs[0].(type) {
-		case *ast.CallExpr:
-			log.Printf("Found call expression on right-hand side: %T", rhs)
-
-			// Extract the function being called
-			if sig, ok := f.pkg.TypesInfo.TypeOf(rhs.Fun).Underlying().(*types.Signature); ok {
-				log.Printf("Function being called: %s", sig)
-				funcResults := sig.Results()
-				if funcResults != nil && funcResults.Len() > lhsIdx {
-					log.Printf("Function returns: %s", funcResults)
-					if funcResults.At(lhsIdx).Type() != nil {
-						log.Printf("Return type at index %d: %s", lhsIdx, funcResults.At(lhsIdx).Type())
-						if namedType, ok := funcResults.At(lhsIdx).Type().(*types.Named); ok {
-							log.Printf("Return type is a named type: %s", namedType.Obj().Name())
-							if namedType.Underlying() != nil {
-								log.Printf("Underlying type of named type: %s", namedType.Underlying())
-								f.createInterfaceReferences(lhs.Methods(), namedType.Underlying().(*types.Interface).Methods())
-							} else {
-								log.Printf("Named type has no underlying type")
-							}
-						} else {
-							log.Printf("Return type is not a named type: %s", funcResults.At(lhsIdx).Type())
-						}
-					} else {
-						log.Printf("Return type at index %d is nil", lhsIdx)
-					}
-				} else {
-					log.Printf("Function has no return values")
-				}
-			} else {
-				log.Printf("Function being called is not a valid type: %T", rhs.Fun)
-			}
-		default:
-			return fmt.Errorf("Unimplemented: single right-hand side expression for interface assignment: %T", allRhs[0])
-		}
-
-	} else {
-		log.Printf("Found %d right-hand side expressions, expected %d", len(allRhs), lhsLen)
-		return fmt.Errorf("mismatched number of left-hand side and right-hand side expressions: %d vs %d", lhsLen, len(allRhs))
+	rhsType, err := f.extractReturnType(allRhs, lhsIdx, lhsLen)
+	if err != nil {
+		log.Printf("Error extracting return type: %v", err)
+		return fmt.Errorf("failed to extract return type: %w", err)
 	}
-	log.Printf("Connecting interface %s to implementation at index %d", lhs, lhsIdx)
+
+	if namedType, ok := rhsType.(*types.Named); !ok {
+		log.Printf("Right-hand side type is not a named type: %T", rhsType)
+		return fmt.Errorf("right-hand side type is not a named type: %T", rhsType)
+	} else {
+		f.createInterfaceReferences(lhs.Methods(), namedType.Methods())
+	}
+
 	return nil
 }
 
@@ -214,21 +241,16 @@ func (f *AssignmentParser) assignStmtParser(parser *ParsingStage, as *ast.Assign
 	return true, nil
 }
 
-func (f *AssignmentParser) returnStmtParser(parser *ParsingStage, fn *ast.FuncDecl, rs *ast.ReturnStmt) (bool, error) {
+func (f *AssignmentParser) returnStmtParser(parser *ParsingStage, fnType *ast.FuncType, rs *ast.ReturnStmt) (bool, error) {
 	if len(rs.Results) == 0 {
 		log.Println("Skipping return statement with no results")
 		return false, nil
 	}
 
-	lhs := fn.Type.Results
+	lhs := fnType.Results
 	if lhs == nil {
 		log.Println("Function has no return values")
 		return false, nil
-	}
-
-	if len(rs.Results) != len(lhs.List) {
-		log.Printf("Return statement has %d results, expected %d", len(rs.Results), len(lhs.List))
-		return false, fmt.Errorf("mismatched number of return values: %d vs %d", len(rs.Results), len(lhs.List))
 	}
 
 	for i, lhsItem := range lhs.List {
@@ -259,7 +281,7 @@ func (f *AssignmentParser) returnStmtParser(parser *ParsingStage, fn *ast.FuncDe
 		}
 
 		if ifaceType != nil {
-			err := f.connectInterfaceToImplementation(ifaceType, i, len(rs.Results), rs.Results)
+			err := f.connectInterfaceToImplementation(ifaceType, i, len(lhs.List), rs.Results)
 			if err != nil {
 				return false, fmt.Errorf("Failed to connect interface %s to implementation: %s", ifaceType, err)
 			}
@@ -271,19 +293,21 @@ func (f *AssignmentParser) returnStmtParser(parser *ParsingStage, fn *ast.FuncDe
 	return true, nil
 }
 
-func (f *AssignmentParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl) (ok bool, err error) {
+func (f *AssignmentParser) functionBodyParser(parser *ParsingStage, fnType *ast.FuncType, fnBody *ast.BlockStmt) (ok bool, err error) {
 
-	if fn.Body == nil {
+	if fnBody == nil {
 		return false, nil
 	}
 
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+	ast.Inspect(fnBody, func(n ast.Node) bool {
 		switch n := n.(type) {
-		case *ast.FuncDecl:
-			return false // stop traversing, we are only interested in the current function body
+		case *ast.FuncLit:
+			log.Printf("Found nested function declaration")
+			f.functionBodyParser(parser, n.Type, n.Body) // Recursively parse nested function bodies
+			return false                                 // stop traversing, we are only interested in the current function body
 		case *ast.ReturnStmt:
 			var ok bool
-			ok, err = f.returnStmtParser(parser, fn, n)
+			ok, err = f.returnStmtParser(parser, fnType, n)
 			if err != nil {
 				log.Printf("Error parsing assign statement: %v", err)
 				return false // stop traversing on error
@@ -294,7 +318,9 @@ func (f *AssignmentParser) functionBodyParser(parser *ParsingStage, fn *ast.Func
 		}
 	})
 
-	return true, nil
+	ok = true
+
+	return
 }
 
 func (f *AssignmentParser) Parse(parser *ParsingStage) (err error) {
@@ -310,7 +336,7 @@ func (f *AssignmentParser) Parse(parser *ParsingStage) (err error) {
 			}
 			return ok // continue traversing
 		case *ast.FuncDecl:
-			ok, err = f.functionBodyParser(parser, n)
+			ok, err = f.functionBodyParser(parser, n.Type, n.Body)
 			if err != nil {
 				log.Printf("Error parsing function body: %v", err)
 				return false // stop traversing on error
