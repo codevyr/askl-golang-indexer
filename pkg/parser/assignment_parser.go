@@ -204,37 +204,25 @@ func (f *AssignmentParser) assignStmtParser(parser *ParsingStage, as *ast.Assign
 
 	for i, lhs := range as.Lhs {
 		log.Printf("Found assign statement left-hand side: %T", lhs)
-		var objVar *types.Var
-		switch lhs := lhs.(type) {
-		case *ast.Ident:
-			log.Printf("Assigning to identifier: %s", lhs.Name)
+		lhsType := f.pkg.TypesInfo.TypeOf(lhs)
+		if lhsType == nil {
+			log.Printf("Left-hand side has no type information")
+			continue // Skip if no type information is available
+		}
 
-			if obj, ok := f.pkg.TypesInfo.Defs[lhs]; ok {
-				objVar = obj.(*types.Var)
-				log.Printf("Full name of identifier: %s", objVar)
-			} else if obj, ok := f.pkg.TypesInfo.Uses[lhs]; ok {
-				objVar = obj.(*types.Var)
-				log.Printf("Full name of identifier: %s", objVar)
-			} else {
-				log.Panicf("Expected to find definition for identifier %s", lhs.Name)
-			}
+		log.Println("Type of left-hand side:", lhsType)
+		log.Printf("Value of left-hand side: %T", lhsType)
 
-			varType, ok := objVar.Type().Underlying().(*types.Interface)
-			if !ok {
-				log.Printf("Identifier %s is of type: %s", objVar.Name(), objVar.Type())
-				continue // Skip non-interface types
-			}
-			log.Printf("Identifier %s is an interface with methods: %v", objVar.Name(), varType.Methods())
+		varType, ok := lhsType.Underlying().(*types.Interface)
+		if !ok {
+			log.Printf("Lhs is of type: %s", lhsType)
+			continue // Skip non-interface types
+		}
+		log.Printf("Lhs is an interface with methods: %v", varType.Methods())
 
-			// Print position information
-			start := f.pkg.Fset.Position(lhs.Pos())
-			end := f.pkg.Fset.Position(lhs.End())
-			log.Printf("Identifier %s position: start %s, end %s", lhs.Name, start, end)
-
-			err := f.connectInterfaceToImplementation(varType, i, len(as.Lhs), as.Rhs)
-			if err != nil {
-				return false, fmt.Errorf("Failed to connect interface %s to implementation: %s", varType, err)
-			}
+		err := f.connectInterfaceToImplementation(varType, i, len(as.Lhs), as.Rhs)
+		if err != nil {
+			return false, fmt.Errorf("failed to connect interface %s to implementation: %s", varType, err)
 		}
 	}
 

@@ -161,8 +161,7 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 					log.Fatalf("Failed to find type for %s in %s", ident.Name, f.filepath)
 				}
 				if typeValue.IsBuiltin() {
-					obj = parser.parser.builtinPkg.Types.Scope().Lookup(ident.Name)
-					pos = parser.parser.builtinPkg.Fset.Position(obj.Pos())
+					obj, pos = parser.parser.builtin.Lookup(ident.Name)
 					call = obj.Id()
 				}
 			} else {
@@ -314,8 +313,51 @@ func (p *FileParser) GetId() (string, bool) {
 	return p.filepath, true
 }
 
+type builtinPkgs struct {
+	pkgs []*packages.Package
+}
+
+func (b *builtinPkgs) Load(cfg *packages.Config) error {
+	pkgNames := []string{"builtin", "unsafe"}
+	var pkgs []*packages.Package
+	pkgs, err := packages.Load(cfg, pkgNames...)
+	if err != nil {
+		return fmt.Errorf("failed to load a package: %w", err)
+	}
+	if len(pkgs) != 2 {
+		return fmt.Errorf("expected %d builtin packages, got %d", len(pkgNames), len(pkgs))
+	}
+
+	b.pkgs = pkgs
+
+	return nil
+}
+
+func (b *builtinPkgs) Apply(f func(*packages.Package) error) error {
+	for _, pkg := range b.pkgs {
+		if err := f(pkg); err != nil {
+			return fmt.Errorf("failed to apply function to builtin package %s: %w", pkg.PkgPath, err)
+		}
+	}
+	return nil
+}
+
+func (b *builtinPkgs) Lookup(name string) (types.Object, token.Position) {
+	for _, pkg := range b.pkgs {
+		obj := pkg.Types.Scope().Lookup(name)
+		if obj == nil {
+			continue
+		}
+
+		pos := pkg.Fset.Position(obj.Pos())
+		return obj, pos
+	}
+
+	return nil, token.Position{}
+}
+
 type Parser struct {
-	builtinPkg *packages.Package
+	builtin builtinPkgs
 
 	pkgs []*packages.Package
 
@@ -348,15 +390,10 @@ func (p *Parser) Load() error {
 		// Dir, Env, or other settings can be specified if needed
 	}
 
-	var pkgs []*packages.Package
-	pkgs, err := packages.Load(cfg, "builtin")
+	err := p.builtin.Load(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to load a package: %w", err)
+		return fmt.Errorf("failed to load builtin packages: %w", err)
 	}
-	if len(pkgs) != 1 {
-		return fmt.Errorf("expected one builtin package, got %d", len(pkgs))
-	}
-	p.builtinPkg = pkgs[0]
 
 	p.pkgs, err = packages.Load(cfg, p.packagePath)
 	if err != nil {
@@ -370,11 +407,15 @@ func (p *Parser) AddPackages() error {
 
 	for _, stage := range p.stages {
 		log.Printf("Running stage: %s", stage.StageName)
-		item := stage.StageConstructor(p, p.builtinPkg, p.index)
-		err := stage.Parse(item)
-		if err != nil {
-			return fmt.Errorf("failed to parse builtin package with stage %s: %w", stage.StageName, err)
-		}
+		p.builtin.Apply(func(pkg *packages.Package) error {
+			item := stage.StageConstructor(p, pkg, p.index)
+			err := stage.Parse(item)
+			if err != nil {
+				return fmt.Errorf("failed to parse builtin package with stage %s: %w", stage.StageName, err)
+			}
+
+			return nil
+		})
 
 		for _, pkg := range p.pkgs {
 			log.Printf("Parsing package %s with stage %s", pkg.PkgPath, stage.StageName)
