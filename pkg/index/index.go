@@ -213,8 +213,9 @@ type Index interface {
 	AddFile(moduleId ModuleId, pkgDir, path string) (FileId, error)
 
 	AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, DeclarationId, error)
-	FindSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, DeclarationId, error)
-	GetAllSymbols() ([]Symbol, error)
+	FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, DeclarationId, error)
+	FindDeclarationId(name string, scope SymbolScope, symbolType SymbolType) ([]DeclarationId, error)
+	GetAllSymbols() ([]SymbolDecl, error)
 
 	AddReference(from DeclarationId, to token.Position, toName string, start token.Position, end token.Position)
 	ResolveReferences() error

@@ -14,7 +14,7 @@ import (
 	"github.com/planetA/askl-golang-indexer/pkg/parser"
 )
 
-var builtinSymbols = []*index.Symbol{
+var builtinSymbols = []*index.SymbolDecl{
 	index.NewSymbol(1, 1, "builtin.append", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
 	index.NewSymbol(1, 1, "builtin.cap", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
 	index.NewSymbol(1, 1, "builtin.clear", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
@@ -47,12 +47,12 @@ var builtinReferences = []*index.ReferenceNames{
 	index.NewReferenceNames("cmp.Compare", "cmp.isNaN"),
 }
 
-func sortedSymbols(symbols []index.Symbol) []*index.Symbol {
-	sorted := make([]*index.Symbol, len(symbols))
+func sortedSymbols(symbols []index.SymbolDecl) []*index.SymbolDecl {
+	sorted := make([]*index.SymbolDecl, len(symbols))
 	for i := range symbols {
 		sorted[i] = &symbols[i]
 	}
-	slices.SortFunc(sorted, func(a, b *index.Symbol) int {
+	slices.SortFunc(sorted, func(a, b *index.SymbolDecl) int {
 		return a.Compare(b)
 	})
 	return sorted
@@ -74,7 +74,7 @@ var _ = Describe("PackageParser", func() {
 		err := idx.Close()
 		Expect(err).ToNot(HaveOccurred(), "Failed to close index")
 	})
-	DescribeTable("Parsing a package", func(testDir string, expectedSymbols []*index.Symbol, expectedReferences []*index.ReferenceNames) {
+	DescribeTable("Parsing a package", func(testDir string, expectedSymbols []*index.SymbolDecl, expectedReferences []*index.ReferenceNames) {
 		cwd, err := os.Getwd()
 		Expect(err).ToNot(HaveOccurred(), "Failed to get current working directory")
 		pkgPath := fmt.Sprintf("%s/test/src/%s", cwd, testDir)
@@ -236,6 +236,75 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("interface_call6.CallInterface", "interface_call6.Mock).MockFunction"),
 				index.NewReferenceNames("interface_call6.Mock).MockFunction", "interface_call6.MockImpl).MockFunction"),
 				index.NewReferenceNames("interface_call6.MockImpl).MockFunction", "builtin.print"),
+			),
+		),
+		Entry("is trivial file", "return_values",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "return_values.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_values.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_values.wrapErrors).Error", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_values.wrapErrors).Unwrap", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_values.Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("return_values.MockFunction", "builtin.print"),
+				index.NewReferenceNames("return_values.MockFunction", "return_values.Foo"),
+			),
+		),
+		Entry("is trivial file", "return_values2",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "return_values2.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_values2.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_values2.Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("return_values2.MockFunction", "builtin.print"),
+				index.NewReferenceNames("return_values2.MockFunction", "return_values2.Foo"),
+			),
+		),
+		Entry("is trivial file", "return_alias",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "return_alias.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_alias.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_alias.wrapErrors).Error", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_alias.wrapErrors).Unwrap", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_alias.Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("return_alias.MockFunction", "builtin.print"),
+				index.NewReferenceNames("return_alias.MockFunction", "return_alias.Foo"),
+			),
+		),
+		Entry("is trivial file", "return_alias2",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "return_alias2.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_alias2.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_alias2.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_alias2.Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("return_alias2.MockFunction", "builtin.print"),
+				index.NewReferenceNames("return_alias2.MockFunction", "return_alias2.Foo"),
+			),
+		),
+		Entry("is trivial file", "return_interface",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "return_interface.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_interface.Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("return_interface.MockFunction", "builtin.print"),
+				index.NewReferenceNames("return_interface.MockFunction", "return_interface.Foo"),
 			),
 		),
 	)

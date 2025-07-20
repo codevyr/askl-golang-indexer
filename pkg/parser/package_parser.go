@@ -193,7 +193,6 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 				pos = f.pkg.Fset.Position(obj.Pos())
 			}
 
-			log.Printf("Found call %s", obj.Name())
 			f.index.AddReference(declId, pos, call, start, end)
 		}
 		return true
@@ -395,7 +394,7 @@ func (p *Parser) Load() error {
 		return fmt.Errorf("failed to load builtin packages: %w", err)
 	}
 
-	p.pkgs, err = packages.Load(cfg, p.packagePath)
+	p.pkgs, err = packages.Load(cfg, p.packagePath, "builtin", "unsafe")
 	if err != nil {
 		return fmt.Errorf("failed to load a package: %w", err)
 	}
@@ -425,7 +424,10 @@ func (p *Parser) AddPackages() error {
 				return fmt.Errorf("failed to parse package %s with stage %s: %w", pkg.PkgPath, stage.StageName, err)
 			}
 		}
-		stage.Wait() // Wait for all parsing to finish
+		err := stage.Wait() // Wait for all parsing to finish
+		if err != nil {
+			return fmt.Errorf("failed to wait for stage %s: %w", stage.StageName, err)
+		}
 		log.Printf("Finished stage: %s", stage.StageName)
 	}
 

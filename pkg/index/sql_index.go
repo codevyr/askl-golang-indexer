@@ -145,7 +145,7 @@ func (f *File) handle(index *SqlIndex) (interface{}, error) {
 	}, nil
 }
 
-type Symbol struct {
+type SymbolDecl struct {
 	IndexItemWithResp
 	moduleId   ModuleId
 	fileId     FileId
@@ -156,10 +156,10 @@ type Symbol struct {
 	end        token.Position
 }
 
-var _ IndexItem = &Symbol{}
+var _ IndexItem = &SymbolDecl{}
 
-func NewSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start *token.Position, end *token.Position) *Symbol {
-	s := &Symbol{
+func NewSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start *token.Position, end *token.Position) *SymbolDecl {
+	s := &SymbolDecl{
 		IndexItemWithResp: NewIndexItemWithResp(),
 		moduleId:          moduleId,
 		fileId:            fileId,
@@ -180,7 +180,7 @@ func NewSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope,
 	return s
 }
 
-func (s *Symbol) Compare(other *Symbol) int {
+func (s *SymbolDecl) Compare(other *SymbolDecl) int {
 	if s.moduleId != other.moduleId {
 		return s.moduleId.Compare(other.moduleId)
 	}
@@ -196,7 +196,7 @@ func (s *Symbol) Compare(other *Symbol) int {
 	return 0
 }
 
-func (s *Symbol) getSymbolId(index *SqlIndex) (SymbolId, error) {
+func (s *SymbolDecl) getSymbolId(index *SqlIndex) (SymbolId, error) {
 
 	row := index.db.QueryRow(selectSymbolSQL, s.name, s.moduleId, s.scope)
 
@@ -223,7 +223,7 @@ func (s *Symbol) getSymbolId(index *SqlIndex) (SymbolId, error) {
 	return SymbolId(symbolIdInt), nil
 }
 
-func (s *Symbol) handle(index *SqlIndex) (interface{}, error) {
+func (s *SymbolDecl) handle(index *SqlIndex) (interface{}, error) {
 	symbolId, err := s.getSymbolId(index)
 	if err != nil {
 		return nil, err
@@ -269,17 +269,17 @@ func (s *Symbol) handle(index *SqlIndex) (interface{}, error) {
 }
 
 type SymbolMatcher struct {
-	Expected *Symbol
+	Expected *SymbolDecl
 }
 
-func RepresentSymbol(expected *Symbol) types.GomegaMatcher {
+func RepresentSymbol(expected *SymbolDecl) types.GomegaMatcher {
 	return &SymbolMatcher{
 		Expected: expected,
 	}
 }
 
 func (matcher *SymbolMatcher) Match(actual any) (success bool, err error) {
-	s, ok := actual.(Symbol)
+	s, ok := actual.(SymbolDecl)
 	if !ok {
 		return false, fmt.Errorf("SymbolMatcher matcher expects a Symbol, got %T", actual)
 	}
@@ -301,7 +301,7 @@ func (matcher *SymbolMatcher) Match(actual any) (success bool, err error) {
 
 func (matcher *SymbolMatcher) FailureMessage(actual any) (message string) {
 	var actualString string
-	if s, ok := actual.(Symbol); ok {
+	if s, ok := actual.(SymbolDecl); ok {
 		actualString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
 			s.moduleId, s.fileId, s.name, s.scope, s.start, s.end)
 	} else {
@@ -321,7 +321,7 @@ func (matcher *SymbolMatcher) FailureMessage(actual any) (message string) {
 
 func (matcher *SymbolMatcher) NegatedFailureMessage(actual any) (message string) {
 	var actualString string
-	if s, ok := actual.(Symbol); ok {
+	if s, ok := actual.(SymbolDecl); ok {
 		actualString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
 			s.moduleId, s.fileId, s.name, s.scope, s.start, s.end)
 	} else {
@@ -479,7 +479,7 @@ func (i *SqlIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scop
 
 	log.Printf("AddSymbol: moduleId=%d, fileId=%d, name=%s, scope=%s, symbolType=%s, start=%v, end=%v",
 		moduleId, fileId, name, scope, symbolType, start, end)
-	s := &Symbol{
+	s := &SymbolDecl{
 		IndexItemWithResp: NewIndexItemWithResp(),
 		fileId:            fileId,
 		moduleId:          moduleId,
@@ -499,7 +499,38 @@ func (i *SqlIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scop
 	return symResp.symbolId, symResp.declarationId, resp.err
 }
 
-func (i *SqlIndex) FindSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, DeclarationId, error) {
+func (i *SqlIndex) FindDeclarationId(name string, scope SymbolScope, symbolType SymbolType) ([]DeclarationId, error) {
+	log.Printf("FindSymbol: name=%s, scope=%s, symbolType=%s",
+		name, scope, symbolType)
+	rows, err := i.db.Query(
+		`SELECT declarations.id
+		 FROM ((declarations
+		 INNER JOIN files ON files.id = declarations.file_id)
+		 INNER JOIN symbols ON symbols.id = declarations.symbol)
+		 WHERE name = ? AND symbol_scope = ? AND symbol_type = ?`,
+		name, scope, symbolType)
+	if err != nil {
+		return []DeclarationId{}, err
+	}
+	defer rows.Close()
+
+	var results []DeclarationId
+	for rows.Next() {
+		var declarationId DeclarationId
+		if err := rows.Scan(&declarationId); err != nil {
+			return []DeclarationId{}, err
+		}
+		results = append(results, declarationId)
+	}
+
+	if err := rows.Err(); err != nil {
+		return []DeclarationId{}, err
+	}
+
+	return results, nil
+}
+
+func (i *SqlIndex) FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, DeclarationId, error) {
 	log.Printf("FindSymbol: moduleId=%d, fileId=%d, name=%s, scope=%s, symbolType=%s",
 		moduleId, fileId, name, scope, symbolType)
 	rows, err := i.db.Query(findDeclarationSQL, moduleId, fileId, name, scope, symbolType)
@@ -540,7 +571,7 @@ func (i *SqlIndex) FindSymbol(moduleId ModuleId, fileId FileId, name string, sco
 	return results[0].symbolId, results[0].declarationId, nil
 }
 
-func (i *SqlIndex) GetAllSymbols() ([]Symbol, error) {
+func (i *SqlIndex) GetAllSymbols() ([]SymbolDecl, error) {
 	rows, err := i.db.Query(
 		`SELECT symbols.module, symbols.name, symbols.symbol_scope, declarations.file_id, declarations.line_start, declarations.col_start, declarations.line_end, declarations.col_end
 FROM ((declarations
@@ -554,9 +585,9 @@ INNER JOIN symbols ON symbols.id = declarations.symbol)`,
 
 	log.Printf("GetAllSymbols: Querying all symbols: %v", i.db.Stats())
 
-	var symbols []Symbol
+	var symbols []SymbolDecl
 	for rows.Next() {
-		var symbol Symbol
+		var symbol SymbolDecl
 		var startLine, startColumn, endLine, endColumn int
 		if err := rows.Scan(&symbol.moduleId, &symbol.name, &symbol.scope, &symbol.fileId, &startLine, &startColumn, &endLine, &endColumn); err != nil {
 			return nil, err
