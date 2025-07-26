@@ -140,13 +140,15 @@ func (f *AssignmentParser) extractReturnType(rhs []ast.Expr, position, total int
 	return rhsType, nil
 }
 
-func unaliasType(t types.Type) types.Type {
+func unwrapType(t types.Type) types.Type {
 	for {
-		if alias, ok := t.(*types.Alias); !ok {
-			return t // If it's not an alias type, we can stop here
-		} else {
-			// If the right-hand side is an alias type, we can try to get its underlying type
-			t = alias.Rhs()
+		switch actualType := t.(type) {
+		case *types.Alias:
+			t = actualType.Rhs()
+		case *types.TypeParam:
+			t = actualType.Constraint()
+		default:
+			return t
 		}
 	}
 }
@@ -158,7 +160,7 @@ func (f *AssignmentParser) connectInterfaceToImplementation(lhs *types.Interface
 		return fmt.Errorf("failed to extract return type: %w", err)
 	}
 
-	rhsType = unaliasType(rhsType)
+	rhsType = unwrapType(rhsType)
 
 	switch rhsType := rhsType.(type) {
 	case *types.Named:

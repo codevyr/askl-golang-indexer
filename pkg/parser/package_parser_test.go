@@ -238,7 +238,7 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("interface_call6.MockImpl).MockFunction", "builtin.print"),
 			),
 		),
-		Entry("is trivial file", "return_values",
+		Entry("return various values", "return_values",
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_values.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
@@ -253,7 +253,7 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_values.MockFunction", "return_values.Foo"),
 			),
 		),
-		Entry("is trivial file", "return_values2",
+		Entry("return different values", "return_values2",
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_values2.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
@@ -266,7 +266,7 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_values2.MockFunction", "return_values2.Foo"),
 			),
 		),
-		Entry("is trivial file", "return_alias",
+		Entry("returns type alias", "return_alias",
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_alias.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
@@ -281,7 +281,7 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_alias.MockFunction", "return_alias.Foo"),
 			),
 		),
-		Entry("is trivial file", "return_alias2",
+		Entry("return another type alias", "return_alias2",
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_alias2.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
@@ -295,7 +295,7 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_alias2.MockFunction", "return_alias2.Foo"),
 			),
 		),
-		Entry("is trivial file", "return_interface",
+		Entry("return interface", "return_interface",
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_interface.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
@@ -305,6 +305,27 @@ var _ = Describe("PackageParser", func() {
 				builtinReferences,
 				index.NewReferenceNames("return_interface.MockFunction", "builtin.print"),
 				index.NewReferenceNames("return_interface.MockFunction", "return_interface.Foo"),
+			),
+		),
+		Entry("return type params", "type_params",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "type_params.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "type_params.isNaN", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "type_params.cmpLess", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "type_params.insertionSortOrdered", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("type_params.insertionSortOrdered", "type_params.cmpLess"),
+				index.NewReferenceNames("type_params.cmpLess", "type_params.isNaN"),
+				index.NewReferenceNames("type_params.cmpLess", "type_params.isNaN"),
+				index.NewReferenceNames("type_params.MockFunction", "builtin.len"),
+				index.NewReferenceNames("type_params.MockFunction", "type_params.insertionSortOrdered"),
+				index.NewReferenceNames("type_params.MockFunction", "builtin.len"),
+				index.NewReferenceNames("type_params.MockFunction", "type_params.insertionSortOrdered"),
+				index.NewReferenceNames("type_params.MockFunction", "builtin.len"),
+				index.NewReferenceNames("type_params.MockFunction", "type_params.insertionSortOrdered"),
 			),
 		),
 	)
