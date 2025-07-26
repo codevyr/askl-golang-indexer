@@ -120,8 +120,13 @@ func (f *AssignmentParser) extractReturnType(rhs []ast.Expr, position, total int
 			}
 
 			return targetType, nil
+		case *ast.TypeAssertExpr:
+			nestedRhsType := f.pkg.TypesInfo.TypeOf(nestedRhs.Type)
+			return nestedRhsType, nil
 		default:
-			log.Printf("Found unhandled nested right-hand side expression: %T", nestedRhs)
+			// Print position of the nested right-hand side expression
+			pos := f.pkg.Fset.Position(nestedRhs.Pos())
+			log.Printf("Nested right-hand side expression at position %s: %T", pos, nestedRhs)
 			return nil, fmt.Errorf("unhandled nested right-hand side expression: %T", nestedRhs)
 		}
 	}

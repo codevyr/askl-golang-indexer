@@ -328,5 +328,19 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("type_params.MockFunction", "type_params.insertionSortOrdered"),
 			),
 		),
+		Entry("returns type assert", "return_type_assert",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "return_type_assert.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_type_assert.Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_type_assert.Token).GetText", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("return_type_assert.MockFunction", "builtin.print"),
+				index.NewReferenceNames("return_type_assert.MockFunction", "return_type_assert.Foo"),
+				index.NewReferenceNames("return_type_assert.Foo", "return_type_assert.Token).GetText"),
+			),
+		),
 	)
 })
