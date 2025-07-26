@@ -342,5 +342,20 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_type_assert.Foo", "return_type_assert.Token).GetText"),
 			),
 		),
+		Entry("returns type assert", "return_index_expression",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "return_index_expression.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_index_expression.Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_index_expression.Token).GetText", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_index_expression.TokenImpl).GetText", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("return_index_expression.MockFunction", "builtin.print"),
+				index.NewReferenceNames("return_index_expression.MockFunction", "return_index_expression.Foo"),
+				index.NewReferenceNames("return_index_expression.Token).GetText", "return_index_expression.TokenImpl).GetText"),
+			),
+		),
 	)
 })

@@ -123,6 +123,15 @@ func (f *AssignmentParser) extractReturnType(rhs []ast.Expr, position, total int
 		case *ast.TypeAssertExpr:
 			nestedRhsType := f.pkg.TypesInfo.TypeOf(nestedRhs.Type)
 			return nestedRhsType, nil
+		case *ast.IndexExpr:
+			nestedRhsType := f.pkg.TypesInfo.TypeOf(nestedRhs.X)
+			// print position of the nested right-hand side expression
+			pos := f.pkg.Fset.Position(nestedRhs.Pos())
+			log.Printf("Nested right-hand side expression at position %s: %T", pos, nestedRhs)
+			if nestedRhsType == nil {
+				return nil, fmt.Errorf("no type information for nested right-hand side expression at position %s", pos)
+			}
+			return nestedRhsType, nil
 		default:
 			// Print position of the nested right-hand side expression
 			pos := f.pkg.Fset.Position(nestedRhs.Pos())
