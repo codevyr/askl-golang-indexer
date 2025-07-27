@@ -357,5 +357,18 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_index_expression.Token).GetText", "return_index_expression.TokenImpl).GetText"),
 			),
 		),
+		Entry("returns grouped variables", "return_grouped",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "return_grouped.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_grouped.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_grouped.Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("return_grouped.MockFunction", "builtin.print"),
+				index.NewReferenceNames("return_grouped.MockFunction", "return_grouped.Foo"),
+			),
+		),
 	)
 })

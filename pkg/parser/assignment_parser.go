@@ -103,15 +103,15 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 // Map rhs return types to lhs function return types. If rhs is a single
 // expression, check the type of the expression and try to extract the return
 // types.
-func (f *AssignmentParser) extractReturnType(rhs []ast.Expr, position, total int) (types.Type, error) {
-	if len(rhs) == 0 {
+func (f *AssignmentParser) extractReturnType(returnExpr []ast.Expr, position, total int) (types.Type, error) {
+	if len(returnExpr) == 0 {
 		return nil, fmt.Errorf("no right-hand side expressions found")
 	}
-	if len(rhs) > 1 && len(rhs) != total {
-		return nil, fmt.Errorf("mismatched number of right-hand side expressions: %d vs %d", len(rhs), total)
+	if len(returnExpr) > 1 && len(returnExpr) != total {
+		return nil, fmt.Errorf("mismatched number of right-hand side expressions: %d vs %d", len(returnExpr), total)
 	}
-	if total > 1 && len(rhs) == 1 {
-		switch nestedRhs := rhs[0].(type) {
+	if total > 1 && len(returnExpr) == 1 {
+		switch nestedRhs := returnExpr[0].(type) {
 		case *ast.CallExpr:
 			// Use our helper function to get the return type
 			targetType, err := f.getCallExprReturnType(nestedRhs, position)
@@ -140,7 +140,7 @@ func (f *AssignmentParser) extractReturnType(rhs []ast.Expr, position, total int
 		}
 	}
 
-	currentRhs := rhs[position]
+	currentRhs := returnExpr[position]
 	// Get the type of the function being called
 	rhsType := f.pkg.TypesInfo.TypeOf(currentRhs)
 	if rhsType == nil {
@@ -233,7 +233,6 @@ func (f *AssignmentParser) assignStmtParser(parser *ParsingStage, as *ast.Assign
 
 func (f *AssignmentParser) returnStmtParser(parser *ParsingStage, fnType *ast.FuncType, rs *ast.ReturnStmt) (bool, error) {
 	if len(rs.Results) == 0 {
-		log.Println("Skipping return statement with no results")
 		return false, nil
 	}
 
@@ -243,42 +242,51 @@ func (f *AssignmentParser) returnStmtParser(parser *ParsingStage, fnType *ast.Fu
 		return false, nil
 	}
 
-	for i, lhsItem := range lhs.List {
-		if lhsItem == nil {
-			continue
-		}
+	total := 0
+	for _, lhsItem := range lhs.List {
+		total += max(len(lhsItem.Names), 1)
+	}
 
-		if lhsItem.Type == nil {
-			continue
-		}
+	idx := 0
+	for _, lhsItem := range lhs.List {
+		countItems := max(len(lhsItem.Names), 1)
+		for range countItems {
+			if lhsItem == nil {
+				continue
+			}
 
-		// Get the types.Type for this field's type directly
-		lhsTypeObj := f.pkg.TypesInfo.TypeOf(lhsItem.Type)
-		if lhsTypeObj == nil {
-			continue
-		}
+			if lhsItem.Type == nil {
+				continue
+			}
 
-		// Check if it's an interface type (could be direct or underlying)
-		var ifaceType *types.Interface
-		if iface, ok := lhsTypeObj.(*types.Interface); ok {
-			// Direct interface type
-			ifaceType = iface
-		} else if named, ok := lhsTypeObj.(*types.Named); ok {
-			// Named type - check if underlying type is interface
-			if iface, ok := named.Underlying().(*types.Interface); ok {
+			// Get the types.Type for this field's type directly
+			lhsTypeObj := f.pkg.TypesInfo.TypeOf(lhsItem.Type)
+			if lhsTypeObj == nil {
+				continue
+			}
+
+			// Check if it's an interface type (could be direct or underlying)
+			var ifaceType *types.Interface
+			if iface, ok := lhsTypeObj.(*types.Interface); ok {
+				// Direct interface type
 				ifaceType = iface
+			} else if named, ok := lhsTypeObj.(*types.Named); ok {
+				// Named type - check if underlying type is interface
+				if iface, ok := named.Underlying().(*types.Interface); ok {
+					ifaceType = iface
+				}
 			}
-		}
 
-		if ifaceType != nil {
-			err := f.connectInterfaceToImplementation(ifaceType, i, len(lhs.List), rs.Results)
-			if err != nil {
-				pos := f.pkg.Fset.Position(lhs.Pos())
-				log.Printf("Error connecting interface %s at position %s: %v", ifaceType, pos, err)
-				return false, fmt.Errorf("failed to connect interface %s to implementation: %s", ifaceType, err)
+			if ifaceType != nil {
+				err := f.connectInterfaceToImplementation(ifaceType, idx, total, rs.Results)
+				if err != nil {
+					pos := f.pkg.Fset.Position(lhs.Pos())
+					log.Printf("Error connecting interface %s at position %s: %v", ifaceType, pos, err)
+					return false, fmt.Errorf("failed to connect interface %s to implementation: %s", ifaceType, err)
+				}
 			}
-		} else {
-			continue
+
+			idx++
 		}
 	}
 
@@ -301,7 +309,6 @@ func (f *AssignmentParser) functionBodyParser(parser *ParsingStage, fnType *ast.
 
 		switch n := n.(type) {
 		case *ast.FuncLit:
-			log.Printf("Found nested function declaration")
 			ok, err = f.functionBodyParser(parser, n.Type, n.Body) // Recursively parse nested function bodies
 			if err != nil {
 				log.Printf("Error parsing nested function body: %v", err)
