@@ -370,5 +370,17 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_grouped.MockFunction", "return_grouped.Foo"),
 			),
 		),
+		Entry("returns grouped variables", "return_nested",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "return_nested.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_nested.sysDialer).dialUnix", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("return_nested.MockFunction", "builtin.print"),
+				index.NewReferenceNames("return_nested.MockFunction", "return_nested.sysDialer).dialUnix"),
+			),
+		),
 	)
 })

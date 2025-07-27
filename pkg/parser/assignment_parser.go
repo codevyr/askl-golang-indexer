@@ -314,7 +314,7 @@ func (f *AssignmentParser) functionBodyParser(parser *ParsingStage, fnType *ast.
 				log.Printf("Error parsing nested function body: %v", err)
 				return false // stop traversing on error
 			}
-			return ok // stop traversing, we are only interested in the current function body
+			return false // stop traversing, we are only interested in the current function body
 		case *ast.ReturnStmt:
 			var ok bool
 			ok, err = f.returnStmtParser(parser, fnType, n)
