@@ -91,7 +91,7 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 				// We can have multiple declarations for an anonymous interface
 				// containing the same methods
 				for _, declId := range declIds {
-					f.index.AddReference(declId, f.pkg.Fset.Position(lhsMethod.Pos()), rhsMethod.FullName(), start, end)
+					f.index.AddReference(declId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethod.FullName(), start, end)
 				}
 			}
 		}
