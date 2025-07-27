@@ -370,7 +370,7 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_grouped.MockFunction", "return_grouped.Foo"),
 			),
 		),
-		Entry("returns grouped variables", "return_nested",
+		Entry("has a nested function", "return_nested",
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_nested.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
@@ -382,7 +382,7 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_nested.MockFunction", "return_nested.sysDialer).dialUnix"),
 			),
 		),
-		Entry("returns grouped variables", "return_pointer",
+		Entry("returns pointer from a function call", "return_pointer",
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_pointer.transport).SupportsUnixFDs", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
@@ -397,6 +397,18 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_pointer.newNonceTcpTransport", "NewConn"),
 				index.NewReferenceNames("return_pointer.MockFunction", "return_pointer.newNonceTcpTransport"),
 				index.NewReferenceNames("return_pointer.MockFunction", "builtin.print"),
+			),
+		),
+		Entry("returns grouped variables", "assign_interface",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "assign_interface.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "assign_interface.Types).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "(interface).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("(interface).FindExtensionByName", "assign_interface.Types).FindExtensionByName"),
 			),
 		),
 	)

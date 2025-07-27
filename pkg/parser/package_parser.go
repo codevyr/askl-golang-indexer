@@ -99,6 +99,33 @@ func NewFileParser(parser *ParsingStage, pkg *packages.Package, filepath string,
 	}, nil
 }
 
+func (f *FileParser) addInterfaceMethods(interfaceType *ast.InterfaceType) (bool, error) {
+	for _, method := range interfaceType.Methods.List {
+		if len(method.Names) == 0 {
+			pos := f.pkg.Fset.Position(method.Pos())
+			log.Printf("Skipping interface method with no name at %s", pos)
+			continue
+		}
+		methodName := method.Names[0]
+		obj, ok := f.pkg.TypesInfo.Defs[methodName]
+		if !ok {
+			return false, fmt.Errorf("expected to find definition %s", methodName)
+		}
+		objFunc := obj.(*types.Func)
+		fullName := objFunc.FullName()
+		symbolScope := GetSymbolScope(methodName.Name)
+		start := f.pkg.Fset.Position(method.Pos())
+		end := f.pkg.Fset.Position(method.End())
+
+		_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeDeclaration, start, end)
+		if err != nil {
+			return false, fmt.Errorf("failed to add symbol: %w", err)
+		}
+	}
+
+	return true, nil
+}
+
 // Find function calls in a given FuncDecl
 func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, declId index.DeclarationId) (err error) {
 	if fn.Body == nil {
@@ -107,6 +134,7 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 
 	// Traverse the function body
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		var recurse bool
 		if callExpr, ok := n.(*ast.CallExpr); ok {
 			start := f.pkg.Fset.Position(n.Pos())
 			end := f.pkg.Fset.Position(n.End())
@@ -142,8 +170,12 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 				log.Println("Unimplemented")
 				return true
 			case *ast.InterfaceType:
-				log.Println("Unimplemented")
-				return true
+				recurse, err = f.addInterfaceMethods(fun)
+				if err != nil {
+					log.Printf("Failed to add interface methods: %v", err)
+					return false
+				}
+				return recurse
 			case *ast.MapType:
 				log.Println("Unimplemented")
 				return true
@@ -218,7 +250,7 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 	// Check if the node is a function declaration
 	obj, ok := f.pkg.TypesInfo.Defs[fn.Name]
 	if !ok {
-		return false, fmt.Errorf("Expected to find definition %s", fn.Name)
+		return false, fmt.Errorf("expected to find definition %s", fn.Name)
 	}
 	objFunc := obj.(*types.Func)
 	fullName := objFunc.FullName()
@@ -229,7 +261,7 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 	end := f.pkg.Fset.Position(fn.End())
 	_, declId, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeDefinition, start, end)
 	if err != nil {
-		return false, fmt.Errorf("Failed to add symbol: %s", err)
+		return false, fmt.Errorf("failed to add symbol: %s", err)
 	}
 
 	f.functionBodyParser(parser, fn, declId)
@@ -275,7 +307,7 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec) bool
 
 		return true // We do not handle interfaces yet
 	default:
-		return false
+		return true
 	}
 }
 
@@ -289,13 +321,20 @@ func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 			log.Printf("Found function literal at %s: %T %T", f.pkg.Fset.Position(n.Pos()), n, n.Type)
 			return true // continue traversing
 		case *ast.FuncType:
-			// log.Println("Unimplemented function type parsing", n)
+			log.Printf("Found function type object at %s: %T", f.pkg.Fset.Position(n.Pos()), n)
 			return true // continue traversing
 		case *ast.FuncDecl:
 			recurse, err = f.funcDeclParser(parser, n)
 			if err != nil {
 				log.Printf("Failed to parse function declaration %s: %v", n.Name.Name, err)
 				return false // stop traversing
+			}
+			return recurse
+		case *ast.InterfaceType:
+			recurse, err = f.addInterfaceMethods(n)
+			if err != nil {
+				log.Printf("Failed to add interface methods: %v", err)
+				return false
 			}
 			return recurse
 		case *ast.TypeSpec:
