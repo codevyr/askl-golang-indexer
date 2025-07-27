@@ -161,6 +161,8 @@ func unwrapType(t types.Type) types.Type {
 			t = actualType.Rhs()
 		case *types.TypeParam:
 			t = actualType.Constraint()
+		case *types.Pointer:
+			t = actualType.Elem()
 		default:
 			return t
 		}
@@ -180,7 +182,6 @@ func (f *AssignmentParser) connectInterfaceToImplementation(lhs *types.Interface
 	case *types.Named:
 		return f.createInterfaceReferences(lhs.Methods(), rhsType.Methods())
 	case *types.Basic, *types.Struct, *types.Slice, *types.Array, *types.Map, *types.Chan:
-		log.Printf("Right-hand side is a basic type: %s %T", rhsType, rhsType)
 		return nil // Untyped nil can be ignored, as it doesn't provide any implementation
 	case *types.Interface:
 		// If the right-hand side is an interface type, we can try to connect it to the left-hand side interface
@@ -188,7 +189,6 @@ func (f *AssignmentParser) connectInterfaceToImplementation(lhs *types.Interface
 			log.Printf("Left-hand side interface is nil, cannot connect to right-hand side interface")
 			return fmt.Errorf("left-hand side interface is nil, cannot connect to right-hand side interface")
 		}
-		log.Printf("Connecting left-hand side interface %s to right-hand side interface %s", lhs, rhsType)
 		// Create references between the methods of the left-hand side interface and the right-hand side interface
 		return f.createInterfaceReferences(lhs.Methods(), rhsType.Methods())
 	default:
@@ -416,15 +416,11 @@ func (f *AssignmentParser) getIdentifierType(ident *ast.Ident) (types.Type, erro
 
 // getCallExprReturnType determines the return type of a call expression at a specific position
 func (f *AssignmentParser) getCallExprReturnType(callExpr *ast.CallExpr, returnIndex int) (types.Type, error) {
-	log.Printf("Determining return type for call expression at index %d", returnIndex)
-
 	// Get the type of the function being called
 	funType := f.pkg.TypesInfo.TypeOf(callExpr.Fun)
 	if funType == nil {
 		return nil, fmt.Errorf("no type information for function in call expression")
 	}
-
-	log.Printf("Function type: %s (%T)", funType, funType)
 
 	// The function type should be a signature
 	sig, ok := funType.Underlying().(*types.Signature)
@@ -447,6 +443,5 @@ func (f *AssignmentParser) getCallExprReturnType(callExpr *ast.CallExpr, returnI
 		return nil, fmt.Errorf("return type at index %d is nil", returnIndex)
 	}
 
-	log.Printf("Return type at index %d: %s (%T)", returnIndex, returnType, returnType)
 	return returnType, nil
 }

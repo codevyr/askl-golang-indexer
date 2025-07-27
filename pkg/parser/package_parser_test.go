@@ -382,5 +382,22 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_nested.MockFunction", "return_nested.sysDialer).dialUnix"),
 			),
 		),
+		Entry("returns grouped variables", "return_pointer",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "return_pointer.transport).SupportsUnixFDs", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_pointer.Conn).SupportsUnixFDs", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_pointer.newNonceTcpTransport", index.ScopeLocal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_pointer.NewConn", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "return_pointer.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("return_pointer.transport).SupportsUnixFDs", "return_pointer.Conn).SupportsUnixFDs"),
+				index.NewReferenceNames("return_pointer.newNonceTcpTransport", "NewConn"),
+				index.NewReferenceNames("return_pointer.MockFunction", "return_pointer.newNonceTcpTransport"),
+				index.NewReferenceNames("return_pointer.MockFunction", "builtin.print"),
+			),
+		),
 	)
 })
