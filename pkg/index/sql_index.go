@@ -500,8 +500,6 @@ func (i *SqlIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scop
 }
 
 func (i *SqlIndex) FindDeclarationId(name string, scope SymbolScope, symbolType SymbolType) ([]DeclarationId, error) {
-	log.Printf("FindSymbol: name=%s, scope=%s, symbolType=%s",
-		name, scope, symbolType)
 	rows, err := i.db.Query(
 		`SELECT declarations.id
 		 FROM ((declarations

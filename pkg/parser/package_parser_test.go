@@ -413,5 +413,18 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("(interface).FindExtensionByName", "assign_interface.Types).FindExtensionByName"),
 			),
 		),
+		Entry("assign a func to any", "assign_func",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "assign_func.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
+				index.NewSymbol(3, 3, "assign_func.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "assign_func.CallInterface", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("assign_func.CallInterface", "assign_func.MockImpl).MockFunction"),
+				index.NewReferenceNames("assign_func.CallInterface", "builtin.panic"),
+			),
+		),
 	)
 })

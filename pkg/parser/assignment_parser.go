@@ -182,7 +182,11 @@ func (f *AssignmentParser) connectInterfaceToImplementation(lhs *types.Interface
 	case *types.Named:
 		return f.createInterfaceReferences(lhs.Methods(), rhsType.Methods())
 	case *types.Basic, *types.Struct, *types.Slice, *types.Array, *types.Map, *types.Chan:
-		return nil // Untyped nil can be ignored, as it doesn't provide any implementation
+		return nil
+	case *types.Signature:
+		// If the right-hand side is a function signature, we can try to connect
+		// it to the left-hand side interface
+		return nil
 	case *types.Interface:
 		// If the right-hand side is an interface type, we can try to connect it to the left-hand side interface
 		if lhs == nil {
@@ -210,7 +214,6 @@ func (f *AssignmentParser) assignStmtParser(parser *ParsingStage, as *ast.Assign
 	for i, lhs := range as.Lhs {
 		lhsType := f.pkg.TypesInfo.TypeOf(lhs)
 		if lhsType == nil {
-			log.Printf("Left-hand side has no type information")
 			continue // Skip if no type information is available
 		}
 
