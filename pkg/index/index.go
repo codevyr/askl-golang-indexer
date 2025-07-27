@@ -192,7 +192,7 @@ func (s SymbolType) String() string {
 }
 
 const (
-	SymbolTypeDeclaration SymbolType = iota
+	SymbolTypeDeclaration SymbolType = iota + 1
 	SymbolTypeDefinition
 )
 

@@ -247,6 +247,9 @@ func (s *SymbolDecl) handle(index *SqlIndex) (interface{}, error) {
 		return -1, err
 	}
 
+	if s.SymbolType == 0 {
+		panic(fmt.Sprintf("SymbolType is not set for symbol %s in file %d", s.Name, s.FileId))
+	}
 	res, err := index.db.Exec(insertDeclarationSQL,
 		symbolId, s.FileId,
 		s.SymbolType,
