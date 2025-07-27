@@ -83,16 +83,16 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 				start := f.pkg.Fset.Position(lhsMethod.Pos())
 				end := f.pkg.Fset.Position(lhsMethod.Pos())
 
-				declId, err := f.index.FindDeclarationId(fullName, symbolScope, index.SymbolTypeDeclaration)
+				declIds, err := f.index.FindDeclarationId(fullName, symbolScope, index.SymbolTypeDeclaration)
 				if err != nil {
 					return fmt.Errorf("failed to find symbol: %w", err)
 				}
 
-				if len(declId) != 1 {
-					return fmt.Errorf("expected exactly one declaration ID for method %s, got %d", fullName, len(declId))
+				// We can have multiple declarations for an anonymous interface
+				// containing the same methods
+				for _, declId := range declIds {
+					f.index.AddReference(declId, f.pkg.Fset.Position(lhsMethod.Pos()), rhsMethod.FullName(), start, end)
 				}
-
-				f.index.AddReference(declId[0], f.pkg.Fset.Position(lhsMethod.Pos()), rhsMethod.FullName(), start, end)
 			}
 		}
 	}
@@ -366,52 +366,11 @@ func (f *AssignmentParser) Parse(parser *ParsingStage) (err error) {
 		}
 	})
 
-	log.Printf("Finished parsing file %s: %v", f.filepath, err)
 	return err
 }
 
 func (p *AssignmentParser) GetId() (string, bool) {
 	return p.filepath, true
-}
-
-// getIdentifierType determines the type of an ast.Ident using multiple methods
-func (f *AssignmentParser) getIdentifierType(ident *ast.Ident) (types.Type, error) {
-	log.Printf("Determining type for identifier: %s", ident.Name)
-
-	// Method 1: TypesInfo.TypeOf() - most reliable for expressions
-	if identType := f.pkg.TypesInfo.TypeOf(ident); identType != nil {
-		log.Printf("Method 1 (TypeOf): %s -> %s (%T)", ident.Name, identType, identType)
-		return identType, nil
-	}
-
-	// Method 2: Check ObjectOf() - gets the semantic object
-	if obj := f.pkg.TypesInfo.ObjectOf(ident); obj != nil {
-		log.Printf("Method 2 (ObjectOf): %s -> %s (%T)", ident.Name, obj, obj)
-		if objType := obj.Type(); objType != nil {
-			log.Printf("Object type: %s (%T)", objType, objType)
-			return objType, nil
-		}
-	}
-
-	// Method 3: Check Uses map - for identifiers used from elsewhere
-	if obj, ok := f.pkg.TypesInfo.Uses[ident]; ok && obj != nil {
-		log.Printf("Method 3 (Uses): %s -> %s (%T)", ident.Name, obj, obj)
-		if objType := obj.Type(); objType != nil {
-			log.Printf("Used object type: %s (%T)", objType, objType)
-			return objType, nil
-		}
-	}
-
-	// Method 4: Check Defs map - for identifiers defined here
-	if obj, ok := f.pkg.TypesInfo.Defs[ident]; ok && obj != nil {
-		log.Printf("Method 4 (Defs): %s -> %s (%T)", ident.Name, obj, obj)
-		if objType := obj.Type(); objType != nil {
-			log.Printf("Defined object type: %s (%T)", objType, objType)
-			return objType, nil
-		}
-	}
-
-	return nil, fmt.Errorf("could not determine type for identifier %s", ident.Name)
 }
 
 // getCallExprReturnType determines the return type of a call expression at a specific position

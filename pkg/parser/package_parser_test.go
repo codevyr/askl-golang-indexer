@@ -399,15 +399,17 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("return_pointer.MockFunction", "builtin.print"),
 			),
 		),
-		Entry("returns grouped variables", "assign_interface",
+		Entry("assigns anonymous interfaces", "assign_interface",
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "assign_interface.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
 				index.NewSymbol(3, 3, "assign_interface.Types).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
 				index.NewSymbol(3, 3, "(interface).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "(interface).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
 			),
 			append(
 				builtinReferences,
+				index.NewReferenceNames("(interface).FindExtensionByName", "assign_interface.Types).FindExtensionByName"),
 				index.NewReferenceNames("(interface).FindExtensionByName", "assign_interface.Types).FindExtensionByName"),
 			),
 		),

@@ -147,13 +147,13 @@ func (f *File) handle(index *SqlIndex) (interface{}, error) {
 
 type SymbolDecl struct {
 	IndexItemWithResp
-	moduleId   ModuleId
-	fileId     FileId
-	name       string
-	scope      SymbolScope
-	symbolType SymbolType
-	start      token.Position
-	end        token.Position
+	ModuleId   ModuleId
+	FileId     FileId
+	Name       string
+	Scope      SymbolScope
+	SymbolType SymbolType
+	Start      token.Position
+	End        token.Position
 }
 
 var _ IndexItem = &SymbolDecl{}
@@ -161,44 +161,44 @@ var _ IndexItem = &SymbolDecl{}
 func NewSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start *token.Position, end *token.Position) *SymbolDecl {
 	s := &SymbolDecl{
 		IndexItemWithResp: NewIndexItemWithResp(),
-		moduleId:          moduleId,
-		fileId:            fileId,
-		name:              name,
-		scope:             scope,
-		symbolType:        symbolType,
+		ModuleId:          moduleId,
+		FileId:            fileId,
+		Name:              name,
+		Scope:             scope,
+		SymbolType:        symbolType,
 	}
 	if start != nil {
-		s.start = *start
+		s.Start = *start
 	} else {
-		s.start = token.Position{Line: 0, Column: 0}
+		s.Start = token.Position{Line: 0, Column: 0}
 	}
 	if end != nil {
-		s.end = *end
+		s.End = *end
 	} else {
-		s.end = token.Position{Line: 0, Column: 0}
+		s.End = token.Position{Line: 0, Column: 0}
 	}
 	return s
 }
 
 func (s *SymbolDecl) Compare(other *SymbolDecl) int {
-	if s.moduleId != other.moduleId {
-		return s.moduleId.Compare(other.moduleId)
+	if s.ModuleId != other.ModuleId {
+		return s.ModuleId.Compare(other.ModuleId)
 	}
-	if s.fileId != other.fileId {
-		return s.fileId.Compare(other.fileId)
+	if s.FileId != other.FileId {
+		return s.FileId.Compare(other.FileId)
 	}
-	if s.name != other.name {
-		return strings.Compare(s.name, other.name)
+	if s.Name != other.Name {
+		return strings.Compare(s.Name, other.Name)
 	}
-	if s.scope != other.scope {
-		return cmp.Compare(s.scope, other.scope)
+	if s.Scope != other.Scope {
+		return cmp.Compare(s.Scope, other.Scope)
 	}
 	return 0
 }
 
 func (s *SymbolDecl) getSymbolId(index *SqlIndex) (SymbolId, error) {
 
-	row := index.db.QueryRow(selectSymbolSQL, s.name, s.moduleId, s.scope)
+	row := index.db.QueryRow(selectSymbolSQL, s.Name, s.ModuleId, s.Scope)
 
 	var symbolId SymbolId
 	var err error
@@ -210,7 +210,7 @@ func (s *SymbolDecl) getSymbolId(index *SqlIndex) (SymbolId, error) {
 		return -1, err
 	}
 
-	res, err := index.db.Exec(insertSymbolSQL, s.name, s.moduleId, s.scope)
+	res, err := index.db.Exec(insertSymbolSQL, s.Name, s.ModuleId, s.Scope)
 	if err != nil {
 		return -1, err
 	}
@@ -230,9 +230,9 @@ func (s *SymbolDecl) handle(index *SqlIndex) (interface{}, error) {
 	}
 
 	row := index.db.QueryRow(
-		selectDeclarationSQL, symbolId, s.fileId,
-		s.start.Line, s.start.Column,
-		s.end.Line, s.end.Column,
+		selectDeclarationSQL, symbolId, s.FileId,
+		s.Start.Line, s.Start.Column,
+		s.End.Line, s.End.Column,
 	)
 
 	var declarationId DeclarationId
@@ -248,10 +248,10 @@ func (s *SymbolDecl) handle(index *SqlIndex) (interface{}, error) {
 	}
 
 	res, err := index.db.Exec(insertDeclarationSQL,
-		symbolId, s.fileId,
-		s.symbolType,
-		s.start.Line, s.start.Column,
-		s.end.Line, s.end.Column,
+		symbolId, s.FileId,
+		s.SymbolType,
+		s.Start.Line, s.Start.Column,
+		s.End.Line, s.End.Column,
 	)
 	if err != nil {
 		return -1, err
@@ -284,26 +284,26 @@ func (matcher *SymbolMatcher) Match(actual any) (success bool, err error) {
 		return false, fmt.Errorf("SymbolMatcher matcher expects a Symbol, got %T", actual)
 	}
 
-	rest := strings.HasSuffix(s.name, matcher.Expected.name) &&
-		s.scope == matcher.Expected.scope
+	rest := strings.HasSuffix(s.Name, matcher.Expected.Name) &&
+		s.Scope == matcher.Expected.Scope
 	if !rest {
 		return false, nil
 	}
 
 	zeroPosition := token.Position{Line: 0, Column: 0}
-	if matcher.Expected.start == zeroPosition && matcher.Expected.end == zeroPosition {
+	if matcher.Expected.Start == zeroPosition && matcher.Expected.End == zeroPosition {
 		return true, nil
 	}
 
-	return s.start == matcher.Expected.start &&
-		s.end == matcher.Expected.end, nil
+	return s.Start == matcher.Expected.Start &&
+		s.End == matcher.Expected.End, nil
 }
 
 func (matcher *SymbolMatcher) FailureMessage(actual any) (message string) {
 	var actualString string
 	if s, ok := actual.(SymbolDecl); ok {
 		actualString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
-			s.moduleId, s.fileId, s.name, s.scope, s.start, s.end)
+			s.ModuleId, s.FileId, s.Name, s.Scope, s.Start, s.End)
 	} else {
 		actualString = fmt.Sprintf("%#v", actual)
 	}
@@ -311,8 +311,8 @@ func (matcher *SymbolMatcher) FailureMessage(actual any) (message string) {
 	var expectedString string
 	if matcher.Expected != nil {
 		expectedString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
-			matcher.Expected.moduleId, matcher.Expected.fileId, matcher.Expected.name,
-			matcher.Expected.scope, matcher.Expected.start, matcher.Expected.end)
+			matcher.Expected.ModuleId, matcher.Expected.FileId, matcher.Expected.Name,
+			matcher.Expected.Scope, matcher.Expected.Start, matcher.Expected.End)
 	} else {
 		expectedString = "nil"
 	}
@@ -323,7 +323,7 @@ func (matcher *SymbolMatcher) NegatedFailureMessage(actual any) (message string)
 	var actualString string
 	if s, ok := actual.(SymbolDecl); ok {
 		actualString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
-			s.moduleId, s.fileId, s.name, s.scope, s.start, s.end)
+			s.ModuleId, s.FileId, s.Name, s.Scope, s.Start, s.End)
 	} else {
 		actualString = fmt.Sprintf("%#v", actual)
 	}
@@ -331,8 +331,8 @@ func (matcher *SymbolMatcher) NegatedFailureMessage(actual any) (message string)
 	var expectedString string
 	if matcher.Expected != nil {
 		expectedString = fmt.Sprintf("{\n\tmoduleId: %d,\n\tfileId: %d,\n\tname: %s,\n\tscope: %s,\n\tstart: %v,\n\tend: %v\n}",
-			matcher.Expected.moduleId, matcher.Expected.fileId, matcher.Expected.name,
-			matcher.Expected.scope, matcher.Expected.start, matcher.Expected.end)
+			matcher.Expected.ModuleId, matcher.Expected.FileId, matcher.Expected.Name,
+			matcher.Expected.Scope, matcher.Expected.Start, matcher.Expected.End)
 	} else {
 		expectedString = "nil"
 	}
@@ -481,13 +481,13 @@ func (i *SqlIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scop
 		moduleId, fileId, name, scope, symbolType, start, end)
 	s := &SymbolDecl{
 		IndexItemWithResp: NewIndexItemWithResp(),
-		fileId:            fileId,
-		moduleId:          moduleId,
-		name:              name,
-		scope:             scope,
-		symbolType:        symbolType,
-		start:             start,
-		end:               end,
+		FileId:            fileId,
+		ModuleId:          moduleId,
+		Name:              name,
+		Scope:             scope,
+		SymbolType:        symbolType,
+		Start:             start,
+		End:               end,
 	}
 	i.channel <- s
 	resp := <-s.respChan()
@@ -589,11 +589,11 @@ INNER JOIN symbols ON symbols.id = declarations.symbol)`,
 	for rows.Next() {
 		var symbol SymbolDecl
 		var startLine, startColumn, endLine, endColumn int
-		if err := rows.Scan(&symbol.moduleId, &symbol.name, &symbol.scope, &symbol.fileId, &startLine, &startColumn, &endLine, &endColumn); err != nil {
+		if err := rows.Scan(&symbol.ModuleId, &symbol.Name, &symbol.Scope, &symbol.FileId, &startLine, &startColumn, &endLine, &endColumn); err != nil {
 			return nil, err
 		}
-		symbol.start = token.Position{Line: startLine, Column: startColumn}
-		symbol.end = token.Position{Line: endLine, Column: endColumn}
+		symbol.Start = token.Position{Line: startLine, Column: startColumn}
+		symbol.End = token.Position{Line: endLine, Column: endColumn}
 		symbols = append(symbols, symbol)
 	}
 	if err := rows.Err(); err != nil {

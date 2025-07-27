@@ -15,6 +15,13 @@ type UnmarshalInput = struct {
 	Depth int
 }
 
+type UnmarshalInput2 = struct {
+	Resolver interface {
+		FindExtensionByName() (int, int)
+	}
+	Depth int
+}
+
 func MockFunction() {
 	var in UnmarshalInput
 	if in.Resolver == nil {
