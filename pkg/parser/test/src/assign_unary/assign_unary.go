@@ -1,4 +1,4 @@
-package assign_func
+package assign_unary
 
 type Mock interface {
 	MockFunction()
@@ -9,7 +9,19 @@ type MockImpl struct {
 }
 
 func (m MockImpl) MockFunction() {
-	m.ShuffleAddressListForTesting = func(n int, swap func(i, j int)) {}
+	checkedMetricChan := make(chan Mock, 1)
+	cmc := checkedMetricChan
+	for {
+		select {
+		case metric, ok := <-cmc:
+			if !ok {
+				return
+			}
+			metric.MockFunction()
+		default:
+			return
+		}
+	}
 }
 
 func CallInterface() {

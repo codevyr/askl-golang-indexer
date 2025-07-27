@@ -426,5 +426,20 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("assign_func.CallInterface", "builtin.panic"),
 			),
 		),
+		Entry("has unary expression", "assign_unary",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "assign_unary.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
+				index.NewSymbol(3, 3, "assign_unary.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "assign_unary.CallInterface", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("assign_unary.MockImpl).MockFunction", "builtin.make"),
+				index.NewReferenceNames("assign_unary.MockImpl).MockFunction", "assign_unary.Mock).MockFunction"),
+				index.NewReferenceNames("assign_unary.CallInterface", "assign_unary.MockImpl).MockFunction"),
+				index.NewReferenceNames("assign_unary.CallInterface", "builtin.panic"),
+			),
+		),
 	)
 })
