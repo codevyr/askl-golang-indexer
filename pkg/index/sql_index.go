@@ -104,9 +104,10 @@ type FileResp struct {
 
 type File struct {
 	IndexItemWithResp
-	module ModuleId
-	pkgDir string
-	path   string
+	module   ModuleId
+	pkgDir   string
+	path     string
+	contents []byte
 }
 
 var _ IndexItem = &File{}
@@ -137,6 +138,11 @@ func (f *File) handle(index *SqlIndex) (interface{}, error) {
 
 	var fileId int64
 	if fileId, err = res.LastInsertId(); err != nil {
+		return nil, err
+	}
+
+	_, err = index.db.Exec("INSERT INTO file_contents(file_id, content) VALUES(?, ?)", fileId, f.contents)
+	if err != nil {
 		return nil, err
 	}
 
@@ -461,7 +467,7 @@ func (i *SqlIndex) AddModule(moduleName string) (ModuleId, error) {
 	return moduleResp.moduleId, resp.err
 }
 
-func (i *SqlIndex) AddFile(moduleId ModuleId, pkgDir, path string) (FileId, error) {
+func (i *SqlIndex) AddFile(moduleId ModuleId, pkgDir, path string, contents []byte) (FileId, error) {
 	i.wg.Add(1)
 
 	f := &File{
@@ -469,6 +475,7 @@ func (i *SqlIndex) AddFile(moduleId ModuleId, pkgDir, path string) (FileId, erro
 		module:            moduleId,
 		pkgDir:            pkgDir,
 		path:              path,
+		contents:          contents,
 	}
 	i.channel <- f
 	resp := <-f.respChan()

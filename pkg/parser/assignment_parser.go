@@ -6,6 +6,7 @@ import (
 	"go/types"
 	"iter"
 	"log"
+	"os"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
 	"golang.org/x/tools/go/packages"
@@ -22,12 +23,27 @@ type AssignmentParser struct {
 
 var _ Parsable = &AssignmentParser{}
 
+func getFileContents(filepath string) ([]byte, error) {
+	// Read the file contents
+	contents, err := os.ReadFile(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file contents: %w", err)
+	}
+	return contents, nil
+}
+
 func NewAssignmentParser(parser *ParsingStage, pkg *packages.Package, filepath string, ast *ast.File, index index.Index) (*AssignmentParser, error) {
 	moduleId, err := index.AddModule(pkg.PkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module: %w", err)
 	}
-	fileId, err := index.AddFile(moduleId, pkg.Dir, filepath)
+
+	contents, err := getFileContents(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file contents: %w", err)
+	}
+
+	fileId, err := index.AddFile(moduleId, pkg.Dir, filepath, contents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file: %w", err)
 	}

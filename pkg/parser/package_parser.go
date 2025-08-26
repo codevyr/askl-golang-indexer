@@ -84,7 +84,13 @@ func NewFileParser(parser *ParsingStage, pkg *packages.Package, filepath string,
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module: %w", err)
 	}
-	fileId, err := index.AddFile(moduleId, pkg.Dir, filepath)
+
+	contents, err := getFileContents(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file contents: %w", err)
+	}
+
+	fileId, err := index.AddFile(moduleId, pkg.Dir, filepath, contents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file: %w", err)
 	}

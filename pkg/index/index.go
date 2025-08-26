@@ -210,7 +210,7 @@ type SymbolResp struct {
 
 type Index interface {
 	AddModule(moduleName string) (ModuleId, error)
-	AddFile(moduleId ModuleId, pkgDir, path string) (FileId, error)
+	AddFile(moduleId ModuleId, pkgDir, path string, contents []byte) (FileId, error)
 
 	AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, DeclarationId, error)
 	FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, DeclarationId, error)
