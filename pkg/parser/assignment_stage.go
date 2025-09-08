@@ -9,18 +9,20 @@ import (
 )
 
 type AssignmentStage struct {
-	parser *Parser
-	pkg    *packages.Package
-	index  index.Index
+	parser          *Parser
+	pkg             *packages.Package
+	index           index.Index
+	continueOnError bool
 }
 
 var _ Parsable = &AssignmentStage{}
 
-func NewAssignmentStage(parser *Parser, pkg *packages.Package, index index.Index) Parsable {
+func NewAssignmentStage(parser *Parser, pkg *packages.Package, index index.Index, continueOnError bool) Parsable {
 	return &AssignmentStage{
-		parser: parser,
-		pkg:    pkg,
-		index:  index,
+		parser:          parser,
+		pkg:             pkg,
+		index:           index,
+		continueOnError: continueOnError,
 	}
 }
 
@@ -43,7 +45,7 @@ func (p *AssignmentStage) Parse(parser *ParsingStage) error {
 	}
 
 	for _, importedPkg := range p.pkg.Imports {
-		err := parser.Parse(NewAssignmentStage(p.parser, importedPkg, p.index))
+		err := parser.Parse(NewAssignmentStage(p.parser, importedPkg, p.index, p.continueOnError))
 		if err != nil {
 			return err
 		}

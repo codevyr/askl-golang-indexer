@@ -354,11 +354,13 @@ func (f *AssignmentParser) functionBodyParser(parser *ParsingStage, fnType *ast.
 }
 
 func (f *AssignmentParser) Parse(parser *ParsingStage) (err error) {
+	// decide if stop traversing on error
+	errorExit := parser.parser.continueOnError
 
 	ast.Inspect(f.ast, func(n ast.Node) bool {
 		if err != nil {
-			log.Printf("Error encountered during parsing, stopping traversal: %v", err)
-			return false // stop traversing on error
+			log.Printf("Error encountered during parsing, stopping traversal (%v): %v", errorExit, err)
+			return errorExit
 		}
 
 		var ok bool
@@ -367,20 +369,25 @@ func (f *AssignmentParser) Parse(parser *ParsingStage) (err error) {
 			ok, err = f.assignStmtParser(parser, n)
 			if err != nil {
 				log.Printf("Error parsing assign statement: %v", err)
-				return false // stop traversing on error
+				return errorExit
 			}
 			return ok // continue traversing
 		case *ast.FuncDecl:
 			ok, err = f.functionBodyParser(parser, n.Type, n.Body)
 			if err != nil {
 				log.Printf("Error parsing function body: %v", err)
-				return false // stop traversing on error
+				return errorExit
 			}
 			return ok // continue traversing
 		default:
 			return true // continue traversing
 		}
 	})
+
+	if errorExit {
+		log.Printf("Finished parsing file %s with error: %v", f.filepath, err)
+		return nil
+	}
 
 	return err
 }

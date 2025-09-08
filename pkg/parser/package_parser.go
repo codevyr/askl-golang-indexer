@@ -18,21 +18,23 @@ type Parsable interface {
 	GetId() (string, bool)
 }
 
-type ParserConstructor func(*Parser, *packages.Package, index.Index) Parsable
+type ParserConstructor func(*Parser, *packages.Package, index.Index, bool) Parsable
 
 type PackageParser struct {
-	parser *Parser
-	pkg    *packages.Package
-	index  index.Index
+	parser          *Parser
+	pkg             *packages.Package
+	index           index.Index
+	continueOnError bool
 }
 
 var _ Parsable = &PackageParser{}
 
-func NewPackageParser(p *Parser, pkg *packages.Package, index index.Index) Parsable {
+func NewPackageParser(p *Parser, pkg *packages.Package, index index.Index, continueOnError bool) Parsable {
 	return &PackageParser{
-		parser: p,
-		pkg:    pkg,
-		index:  index,
+		parser:          p,
+		pkg:             pkg,
+		index:           index,
+		continueOnError: continueOnError,
 	}
 }
 
@@ -55,7 +57,7 @@ func (p *PackageParser) Parse(parser *ParsingStage) error {
 	}
 
 	for _, importedPkg := range p.pkg.Imports {
-		err := parser.Parse(NewPackageParser(p.parser, importedPkg, p.index))
+		err := parser.Parse(NewPackageParser(p.parser, importedPkg, p.index, p.continueOnError))
 		if err != nil {
 			return err
 		}
@@ -193,6 +195,10 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 			}
 			var pos token.Position
 			obj := f.pkg.TypesInfo.ObjectOf(ident)
+			if obj == nil {
+				log.Printf("Unimplemented: %s call= %+v obj= %+v %s %s %T", ident, call, obj, start, end, callExpr.Fun)
+				return true
+			}
 			if !obj.Pos().IsValid() {
 				typeValue, ok := f.pkg.TypesInfo.Types[callExpr.Fun]
 				if !ok {
@@ -409,13 +415,27 @@ type Parser struct {
 
 	packagePath string
 	index       index.Index
+
+	continueOnError bool
 }
 
-func NewParser(packagePath string, index index.Index) *Parser {
+type option func(*Parser)
+
+func WithContinueOnError(continueOnError bool) option {
+	return func(p *Parser) {
+		p.continueOnError = continueOnError
+	}
+}
+
+func NewParser(packagePath string, index index.Index, options ...option) *Parser {
 	p := &Parser{
 		packagePath: packagePath,
 		index:       index,
 		stages:      []*ParsingStage{},
+	}
+
+	for _, opt := range options {
+		opt(p)
 	}
 
 	p.stages = append(p.stages,
@@ -452,7 +472,7 @@ func (p *Parser) AddPackages() error {
 	for _, stage := range p.stages {
 		log.Printf("Running stage: %s", stage.StageName)
 		p.builtin.Apply(func(pkg *packages.Package) error {
-			item := stage.StageConstructor(p, pkg, p.index)
+			item := stage.StageConstructor(p, pkg, p.index, p.continueOnError)
 			err := stage.Parse(item)
 			if err != nil {
 				return fmt.Errorf("failed to parse builtin package with stage %s: %w", stage.StageName, err)
@@ -463,7 +483,7 @@ func (p *Parser) AddPackages() error {
 
 		for _, pkg := range p.pkgs {
 			log.Printf("Parsing package %s with stage %s", pkg.PkgPath, stage.StageName)
-			item := stage.StageConstructor(p, pkg, p.index)
+			item := stage.StageConstructor(p, pkg, p.index, p.continueOnError)
 			err := stage.Parse(item)
 			if err != nil {
 				return fmt.Errorf("failed to parse package %s with stage %s: %w", pkg.PkgPath, stage.StageName, err)
