@@ -75,7 +75,10 @@ func parseModule(flags Flags, packageType ModuleType) error {
 
 	log.Printf("Module path: %v Package path %v", module.Module.Mod.Path, flags.packagePath)
 
-	parser := parser.NewParser(flags.packagePath, index, parser.WithContinueOnError(flags.continueOnError))
+	parser := parser.NewParser(flags.packagePath, index,
+		parser.WithContinueOnError(flags.continueOnError),
+		parser.WithParseTypes(flags.parseTypes),
+	)
 	defer parser.Close()
 
 	err = parser.Load()
@@ -103,6 +106,7 @@ type Flags struct {
 	packageName     string
 	indexPath       string
 	continueOnError bool
+	parseTypes      bool
 }
 
 func main() {
@@ -135,6 +139,12 @@ func main() {
 				Value:       false,
 				Usage:       "Continue parsing if an error is encountered",
 				Destination: &flags.continueOnError,
+			},
+			&cli.BoolFlag{
+				Name:        "parse-types",
+				Value:       false,
+				Usage:       "Parse type information",
+				Destination: &flags.parseTypes,
 			},
 		},
 		Action: func(context.Context, *cli.Command) error {
