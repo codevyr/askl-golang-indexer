@@ -443,5 +443,19 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("assign_unary.CallInterface", "builtin.panic"),
 			),
 		),
+		Entry("is an indirect interface call", "interface_indirect1",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "interface_indirect1.Mock2).MockFunction", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
+				index.NewSymbol(3, 3, "interface_indirect1.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "interface_indirect1.CallInterface", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("interface_indirect1.Mock2).MockFunction", "interface_indirect1.MockImpl).MockFunction"),
+				index.NewReferenceNames("interface_indirect1.MockImpl).MockFunction", "builtin.print"),
+				index.NewReferenceNames("interface_indirect1.CallInterface", "builtin.print"),
+			),
+		),
 	)
 })

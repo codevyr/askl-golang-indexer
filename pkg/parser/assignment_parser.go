@@ -247,6 +247,43 @@ func (f *AssignmentParser) assignStmtParser(parser *ParsingStage, as *ast.Assign
 	return true, nil
 }
 
+func (f *AssignmentParser) valueSpecParser(parser *ParsingStage, vs *ast.ValueSpec) (bool, error) {
+	if len(vs.Names) == 0 {
+		log.Println("Skipping value spec with no names")
+		return false, nil
+	}
+	if len(vs.Values) == 0 {
+		log.Println("Skipping value spec with no values")
+		return false, nil
+	}
+
+	for i, name := range vs.Names {
+		if name == nil {
+			continue
+		}
+
+		lhsType := f.pkg.TypesInfo.TypeOf(name)
+		if lhsType == nil {
+			continue // Skip if no type information is available
+		}
+
+		varType, ok := lhsType.Underlying().(*types.Interface)
+		if !ok {
+			continue // Skip non-interface types
+		}
+
+		err := f.connectInterfaceToImplementation(varType, i, len(vs.Names), vs.Values)
+		if err != nil {
+			// Print the location of the assignment
+			pos := f.pkg.Fset.Position(name.Pos())
+			log.Printf("Error connecting interface %s at position %s: %v", varType, pos, err)
+			return false, fmt.Errorf("failed to connect interface %s to implementation: %s", varType, err)
+		}
+	}
+
+	return true, nil
+}
+
 func (f *AssignmentParser) returnStmtParser(parser *ParsingStage, fnType *ast.FuncType, rs *ast.ReturnStmt) (bool, error) {
 	if len(rs.Results) == 0 {
 		return false, nil
@@ -371,16 +408,23 @@ func (f *AssignmentParser) Parse(parser *ParsingStage) (err error) {
 				log.Printf("Error parsing assign statement: %v", err)
 				return errorExit
 			}
-			return ok // continue traversing
+			return ok
+		case *ast.ValueSpec:
+			ok, err = f.valueSpecParser(parser, n)
+			if err != nil {
+				log.Printf("Error parsing value spec: %v", err)
+				return errorExit
+			}
+			return ok
 		case *ast.FuncDecl:
 			ok, err = f.functionBodyParser(parser, n.Type, n.Body)
 			if err != nil {
 				log.Printf("Error parsing function body: %v", err)
 				return errorExit
 			}
-			return ok // continue traversing
+			return ok
 		default:
-			return true // continue traversing
+			return true
 		}
 	})
 
