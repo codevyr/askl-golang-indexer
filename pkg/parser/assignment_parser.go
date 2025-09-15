@@ -145,6 +145,18 @@ func (f *AssignmentParser) extractReturnType(returnExpr []ast.Expr, position, to
 		case *ast.UnaryExpr:
 			nestedRhsType := f.pkg.TypesInfo.TypeOf(nestedRhs.X)
 			return nestedRhsType, nil
+		case *ast.CompositeLit:
+			nestedRhsType := f.pkg.TypesInfo.TypeOf(nestedRhs)
+			return nestedRhsType, nil
+		case *ast.FuncLit:
+			nestedRhsType := f.pkg.TypesInfo.TypeOf(nestedRhs)
+			return nestedRhsType, nil
+		case *ast.SelectorExpr:
+			nestedRhsType := f.pkg.TypesInfo.TypeOf(nestedRhs)
+			return nestedRhsType, nil
+		case *ast.Ident:
+			nestedRhsType := f.pkg.TypesInfo.TypeOf(nestedRhs)
+			return nestedRhsType, nil
 		default:
 			// Print position of the nested right-hand side expression
 			pos := f.pkg.Fset.Position(nestedRhs.Pos())
@@ -247,13 +259,73 @@ func (f *AssignmentParser) assignStmtParser(parser *ParsingStage, as *ast.Assign
 	return true, nil
 }
 
+func (f *AssignmentParser) callExprParser(parser *ParsingStage, call *ast.CallExpr) (bool, error) {
+	if call == nil {
+		return false, nil
+	}
+
+	// Get the function being called
+	fun := call.Fun
+	if fun == nil {
+		return false, nil
+	}
+
+	// Get the type of the function being called
+	funType := f.pkg.TypesInfo.TypeOf(fun)
+	if funType == nil {
+		log.Println("Skipping call expression with no type information for function")
+		return false, nil
+	}
+
+	sig, ok := funType.Underlying().(*types.Signature)
+	if !ok {
+		return false, nil
+	}
+
+	if sig.Params() == nil || sig.Params().Len() == 0 {
+		// No return values to process
+		return false, nil
+	}
+
+	nParams := sig.Params().Len()
+	if sig.Variadic() && len(call.Args) >= nParams-1 {
+		nParams = len(call.Args)
+	}
+
+	// Iterate over the return values of the function signature
+	for i := 0; i < sig.Params().Len(); i++ {
+		param := sig.Params().At(i)
+		if param == nil {
+			continue
+		}
+
+		paramType := param.Type()
+		if paramType == nil {
+			continue
+		}
+
+		varType, ok := paramType.Underlying().(*types.Interface)
+		if !ok {
+			continue // Skip non-interface types
+		}
+
+		err := f.connectInterfaceToImplementation(varType, i, nParams, call.Args)
+		if err != nil {
+			// Print the location of the call expression
+			pos := f.pkg.Fset.Position(call.Pos())
+			log.Printf("Error connecting interface %s at position %s: %v", varType, pos, err)
+			return false, fmt.Errorf("failed to connect interface %s to implementation: %s", varType, err)
+		}
+	}
+
+	return true, nil
+}
+
 func (f *AssignmentParser) valueSpecParser(parser *ParsingStage, vs *ast.ValueSpec) (bool, error) {
 	if len(vs.Names) == 0 {
-		log.Println("Skipping value spec with no names")
 		return false, nil
 	}
 	if len(vs.Values) == 0 {
-		log.Println("Skipping value spec with no values")
 		return false, nil
 	}
 
@@ -413,6 +485,13 @@ func (f *AssignmentParser) Parse(parser *ParsingStage) (err error) {
 			ok, err = f.valueSpecParser(parser, n)
 			if err != nil {
 				log.Printf("Error parsing value spec: %v", err)
+				return errorExit
+			}
+			return ok
+		case *ast.CallExpr:
+			ok, err = f.callExprParser(parser, n)
+			if err != nil {
+				log.Printf("Error parsing call expression: %v", err)
 				return errorExit
 			}
 			return ok
