@@ -62,6 +62,7 @@ func parseModule(flags Flags, packageType ModuleType) error {
 		index.WithRecreate(true),
 		index.WithJournal(index.JournalModeOff),
 		index.WithSynchronous(index.SynchronousModeOff),
+		index.WithProject(flags.projectName),
 	)
 	if err != nil {
 		return err
@@ -105,6 +106,7 @@ type Flags struct {
 	packagePath     string
 	packageName     string
 	indexPath       string
+	projectName     string
 	continueOnError bool
 	parseTypes      bool
 }
@@ -116,6 +118,12 @@ func main() {
 		Name:  "askl-golang-indexer",
 		Usage: "Create askl index for a Go package",
 		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "project",
+				Value:       "main",
+				Usage:       "`NAME` of the project",
+				Destination: &flags.projectName,
+			},
 			&cli.StringFlag{
 				Name:        "path",
 				Value:       ".",

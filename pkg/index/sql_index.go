@@ -2,6 +2,7 @@ package index
 
 import (
 	"cmp"
+	"crypto/sha512"
 	"database/sql"
 	_ "embed"
 	"fmt"
@@ -19,8 +20,14 @@ var (
 	//go:embed sql/select_module.sql
 	selectModuleSQL string
 
+	//go:embed sql/select_project.sql
+	selectProjectSQL string
+
 	//go:embed sql/insert_module.sql
 	insertModuleSQL string
+
+	//go:embed sql/insert_project.sql
+	insertProjectSQL string
 
 	//go:embed sql/select_file.sql
 	selectFileSQL string
@@ -59,13 +66,14 @@ type ModuleResp struct {
 
 type Module struct {
 	IndexItemWithResp
-	name string
+	name      string
+	projectId int64
 }
 
 var _ IndexItem = &File{}
 
 func (f *Module) handle(index *SqlIndex) (interface{}, error) {
-	row := index.db.QueryRow(selectModuleSQL, f.name)
+	row := index.db.QueryRow(selectModuleSQL, f.name, f.projectId)
 
 	moduleResp := ModuleResp{}
 	var err error
@@ -77,7 +85,7 @@ func (f *Module) handle(index *SqlIndex) (interface{}, error) {
 		return nil, err
 	}
 
-	res, err := index.db.Exec(insertModuleSQL, f.name)
+	res, err := index.db.Exec(insertModuleSQL, f.name, index.projectId)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +120,10 @@ type File struct {
 
 var _ IndexItem = &File{}
 
+func computeHash(contents []byte) string {
+	return fmt.Sprintf("%x", sha512.Sum512(contents))
+}
+
 func (f *File) handle(index *SqlIndex) (interface{}, error) {
 	modulePath, ok := strings.CutPrefix(f.path, f.pkgDir)
 	if !ok {
@@ -119,36 +131,42 @@ func (f *File) handle(index *SqlIndex) (interface{}, error) {
 		modulePath = f.path
 	}
 
-	row := index.db.QueryRow(selectFileSQL, f.module, modulePath)
+	row := index.db.QueryRow("SELECT id, content_hash FROM files WHERE filesystem_path = ?", f.path)
 
 	fileResp := FileResp{}
-	var err error
-	if err = row.Scan(&fileResp.fileId); err == nil {
+	var contentHash string
+	switch err := row.Scan(&fileResp.fileId, &contentHash); err {
+	case nil:
+		// Hash of the new content and existing content should match
+		hash := computeHash(f.contents)
+		if hash != contentHash {
+			return nil, fmt.Errorf("content hash mismatch for file %v", f.path)
+		}
 		return fileResp, nil
-	} else if err == sql.ErrNoRows {
-		// We exit the if condition to to insert the row.
-	} else {
+	case sql.ErrNoRows:
+		hash := computeHash(f.contents)
+		res, err := index.db.Exec(insertFileSQL, f.module, modulePath, f.path, goFileType, hash)
+		if err != nil {
+			return nil, err
+		}
+
+		var fileId int64
+		if fileId, err = res.LastInsertId(); err != nil {
+			return nil, err
+		}
+
+		_, err = index.db.Exec("INSERT INTO file_contents(file_id, content) VALUES(?, ?)", fileId, f.contents)
+		if err != nil {
+			return nil, err
+		}
+
+		return FileResp{
+			fileId: FileId(fileId),
+		}, nil
+	default:
 		return nil, err
 	}
 
-	res, err := index.db.Exec(insertFileSQL, f.module, modulePath, f.path, goFileType)
-	if err != nil {
-		return nil, err
-	}
-
-	var fileId int64
-	if fileId, err = res.LastInsertId(); err != nil {
-		return nil, err
-	}
-
-	_, err = index.db.Exec("INSERT INTO file_contents(file_id, content) VALUES(?, ?)", fileId, f.contents)
-	if err != nil {
-		return nil, err
-	}
-
-	return FileResp{
-		fileId: FileId(fileId),
-	}, nil
 }
 
 type SymbolDecl struct {
@@ -407,7 +425,9 @@ WHERE files.filesystem_path = ?  AND name = ?`,
 type SqlIndex struct {
 	mu sync.Mutex
 
-	project string
+	project   string
+	projectId int64
+
 	db      *sql.DB
 	channel chan IndexItem
 	wg      sync.WaitGroup
@@ -448,6 +468,31 @@ func NewSqlIndex(options ...Option) (Index, error) {
 		referencesLog: make([]*Reference, 0),
 	}
 
+	if index.project != "" {
+		row := db.QueryRow(selectProjectSQL, index.project)
+		switch err := row.Scan(&index.projectId); err {
+		case nil:
+			// project already exists
+		case sql.ErrNoRows:
+			res, execErr := db.Exec(insertProjectSQL, index.project)
+			if execErr != nil {
+				db.Close()
+				return nil, execErr
+			}
+
+			projectId, idErr := res.LastInsertId()
+			if idErr != nil {
+				db.Close()
+				return nil, idErr
+			}
+
+			index.projectId = projectId
+		default:
+			db.Close()
+			return nil, err
+		}
+	}
+
 	go index.loop()
 
 	return index, nil
@@ -459,6 +504,7 @@ func (i *SqlIndex) AddModule(moduleName string) (ModuleId, error) {
 	f := &Module{
 		IndexItemWithResp: NewIndexItemWithResp(),
 		name:              moduleName,
+		projectId:         i.projectId,
 	}
 	i.channel <- f
 	resp := <-f.respChan()

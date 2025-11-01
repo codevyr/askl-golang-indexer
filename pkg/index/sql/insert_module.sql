@@ -1,2 +1,2 @@
-INSERT INTO modules (module_name)
-VALUES (?1);
+INSERT INTO modules (module_name, project_id)
+VALUES (?1, ?2);
