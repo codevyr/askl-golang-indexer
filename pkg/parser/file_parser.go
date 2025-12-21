@@ -152,17 +152,7 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 			} else {
 				switch obj := obj.(type) {
 				case *types.Func:
-					call = obj.FullName()
-					sig, ok := obj.Type().(*types.Signature)
-					if !ok {
-						log.Fatalf("Function %s has no signature", call)
-					}
-					if sig.Recv() != nil {
-						if sig.Recv() != sig.Recv().Origin() {
-							log.Println("Unimplemented generic interface:", obj.String(), start, end)
-							return true
-						}
-					}
+					call = obj.Origin().FullName()
 				case *types.TypeName:
 					log.Println("Unimplemented:", obj.String(), start, end)
 					return true

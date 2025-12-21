@@ -512,5 +512,19 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("func_as_param.CallInterface", "builtin.print"),
 			),
 		),
+		Entry("checks generic functions", "generic_functions",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "generic_functions.Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "generic_functions.NewPodSetReducer", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "generic_functions.PodSetReducer[R]).Search", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("Foo", "generic_functions.NewPodSetReducer"),
+				index.NewReferenceNames("Foo", "PodSetReducer[R]).Search"),
+				index.NewReferenceNames("Foo", "builtin.print"),
+			),
+		),
 	)
 })
