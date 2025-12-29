@@ -526,5 +526,17 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("Foo", "builtin.print"),
 			),
 		),
+		Entry("checks parsing of channels", "channel",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "channel.Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("Foo", "builtin.make"),
+				index.NewReferenceNames("Foo", "builtin.println"),
+				index.NewReferenceNames("Foo", "builtin.println"),
+			),
+		),
 	)
 })

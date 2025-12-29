@@ -157,6 +157,9 @@ func (f *AssignmentParser) extractReturnType(returnExpr []ast.Expr, position, to
 		case *ast.Ident:
 			nestedRhsType := f.pkg.TypesInfo.TypeOf(nestedRhs)
 			return nestedRhsType, nil
+		case *ast.ParenExpr:
+			nestedRhsSlice := []ast.Expr{nestedRhs.X}
+			return f.extractReturnType(nestedRhsSlice, position, total)
 		default:
 			// Print position of the nested right-hand side expression
 			pos := f.pkg.Fset.Position(nestedRhs.Pos())
