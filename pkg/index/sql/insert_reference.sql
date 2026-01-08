@@ -1,2 +1,2 @@
-INSERT OR IGNORE INTO symbol_refs (from_decl, to_symbol, from_line, from_col_start, from_col_end)
-VALUES (?, ?, ?, ?, ?)
+INSERT OR IGNORE INTO symbol_refs (to_symbol, from_file, from_offset_start, from_offset_end)
+VALUES (?, ?, ?, ?)

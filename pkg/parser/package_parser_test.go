@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -412,7 +414,6 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinReferences,
 				index.NewReferenceNames("(interface).FindExtensionByName", "assign_interface.Types).FindExtensionByName"),
-				index.NewReferenceNames("(interface).FindExtensionByName", "assign_interface.Types).FindExtensionByName"),
 			),
 		),
 		Entry("assign a func to any", "assign_func",
@@ -538,5 +539,86 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("Foo", "builtin.println"),
 			),
 		),
+		Entry("checks anonymous interface", "anonymous_interface",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "anonymous_interface.MockFunction", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "anonymous_interface.ClearUnknown", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "(interface).Has", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "fieldNum).Has", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("ClearUnknown", "(interface).Has"),
+				index.NewReferenceNames("ClearUnknown", "fieldNum).Has"),
+				index.NewReferenceNames("ClearUnknown", "builtin.print"),
+				index.NewReferenceNames("(interface).Has", "fieldNum).Has"),
+				index.NewReferenceNames("MockFunction", "ClearUnknown"),
+			),
+		),
 	)
+})
+
+var _ = Describe("MultiProjectIndex", func() {
+	It("indexes two projects into a single DB", func() {
+		tmpFile, err := os.CreateTemp("", "askl-index-*.db")
+		Expect(err).ToNot(HaveOccurred(), "Failed to create temp db file")
+		dbPath := tmpFile.Name()
+		Expect(tmpFile.Close()).To(Succeed())
+		defer os.Remove(dbPath)
+
+		cwd, err := os.Getwd()
+		Expect(err).ToNot(HaveOccurred(), "Failed to get current working directory")
+		project1Path := filepath.Join(cwd, "test", "src", "mock1")
+		project2Path := filepath.Join(cwd, "test", "src", "assign_interface")
+
+		builtinPath := filepath.Join(runtime.GOROOT(), "src", "builtin", "builtin.go")
+
+		runProject := func(projectName, pkgPath, projectFile string, recreate bool) {
+			idx, err := index.NewSqlIndex(
+				index.WithIndexPath(dbPath),
+				index.WithProject(projectName),
+				index.WithRecreate(recreate),
+			)
+			Expect(err).ToNot(HaveOccurred(), "Failed to create index")
+
+			pkgParser := parser.NewParser(pkgPath, idx)
+			defer pkgParser.Close()
+
+			err = pkgParser.Load()
+			Expect(err).ToNot(HaveOccurred(), "Failed to load parser")
+
+			err = pkgParser.AddPackages()
+			Expect(err).ToNot(HaveOccurred(), "Failed to add packages to parser")
+
+			err = idx.ResolveReferences()
+			Expect(err).ToNot(HaveOccurred(), "Failed to resolve references")
+
+			err = idx.Wait()
+			Expect(err).ToNot(HaveOccurred(), "Failed to wait for index to finish")
+
+			_, err = idx.FindFileId(projectFile)
+			Expect(err).ToNot(HaveOccurred(), "Failed to find project file ID")
+			_, err = idx.FindFileId(builtinPath)
+			Expect(err).ToNot(HaveOccurred(), "Failed to find builtin file ID")
+
+			err = idx.Close()
+			Expect(err).ToNot(HaveOccurred(), "Failed to close index")
+		}
+
+		runProject("project_one", project1Path, filepath.Join(project1Path, "mock.go"), true)
+		runProject("project_two", project2Path, filepath.Join(project2Path, "assign_interface.go"), false)
+
+		idx, err := index.NewSqlIndex(
+			index.WithIndexPath(dbPath),
+			index.WithProject("project_one"),
+		)
+		Expect(err).ToNot(HaveOccurred(), "Failed to re-open index for project_one")
+		defer idx.Close()
+
+		_, err = idx.FindFileId(filepath.Join(project1Path, "mock.go"))
+		Expect(err).ToNot(HaveOccurred(), "Failed to find project_one file ID after second project")
+		_, err = idx.FindFileId(builtinPath)
+		Expect(err).ToNot(HaveOccurred(), "Failed to find builtin file ID after second project")
+	})
 })

@@ -1,3 +1,3 @@
-INSERT INTO declarations (symbol, file_id, symbol_type, line_start, col_start, line_end, col_end)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO declarations (symbol, file_id, symbol_type, start_offset, end_offset)
+VALUES (?, ?, ?, ?, ?)
 RETURNING id

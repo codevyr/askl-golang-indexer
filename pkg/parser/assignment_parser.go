@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"iter"
 	"log"
@@ -94,21 +95,25 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 			}
 
 			if lhsMethod.Name() == rhsMethod.Name() {
-				fullName := lhsMethodName
-				symbolScope := GetSymbolScope(lhsMethod.Name())
-				start := f.pkg.Fset.Position(lhsMethod.Pos())
-				end := f.pkg.Fset.Position(lhsMethod.Pos())
+				var start, end token.Position
+				var fileId index.FileId
+				var err error
 
-				declIds, err := f.index.FindDeclarationId(fullName, symbolScope, index.SymbolTypeDeclaration)
-				if err != nil {
-					return fmt.Errorf("failed to find symbol: %w", err)
+				if lhsMethod.Pos().IsValid() {
+					start = f.pkg.Fset.Position(lhsMethod.Pos())
+					end = f.pkg.Fset.Position(lhsMethod.Pos())
+					fileId, err = f.index.FindFileId(start.Filename)
+					if err != nil {
+						return fmt.Errorf("failed to find file ID for %s: %w", start.Filename, err)
+					}
+				} else {
+					fileId, start, end, err = f.index.FindBuiltinDeclaration(lhsMethod.Name())
+					if err != nil {
+						return fmt.Errorf("failed to find builtin declaration for %s: %w", lhsMethod.Name(), err)
+					}
 				}
 
-				// We can have multiple declarations for an anonymous interface
-				// containing the same methods
-				for _, declId := range declIds {
-					f.index.AddReference(declId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethod.FullName(), start, end)
-				}
+				f.index.AddReference(fileId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethod.FullName(), start, end)
 			}
 		}
 	}

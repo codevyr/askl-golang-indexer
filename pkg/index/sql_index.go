@@ -131,7 +131,7 @@ func (f *File) handle(index *SqlIndex) (interface{}, error) {
 		modulePath = f.path
 	}
 
-	row := index.db.QueryRow("SELECT id, content_hash FROM files WHERE filesystem_path = ?", f.path)
+	row := index.db.QueryRow("SELECT id, content_hash FROM files WHERE filesystem_path = ? AND module = ?", f.path, f.module)
 
 	fileResp := FileResp{}
 	var contentHash string
@@ -194,12 +194,12 @@ func NewSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope,
 	if start != nil {
 		s.Start = *start
 	} else {
-		s.Start = token.Position{Line: 0, Column: 0}
+		s.Start = token.Position{}
 	}
 	if end != nil {
 		s.End = *end
 	} else {
-		s.End = token.Position{Line: 0, Column: 0}
+		s.End = token.Position{}
 	}
 	return s
 }
@@ -255,8 +255,8 @@ func (s *SymbolDecl) handle(index *SqlIndex) (interface{}, error) {
 
 	row := index.db.QueryRow(
 		selectDeclarationSQL, symbolId, s.FileId,
-		s.Start.Line, s.Start.Column,
-		s.End.Line, s.End.Column,
+		s.Start.Offset,
+		s.End.Offset,
 	)
 
 	var declarationId DeclarationId
@@ -277,8 +277,8 @@ func (s *SymbolDecl) handle(index *SqlIndex) (interface{}, error) {
 	res, err := index.db.Exec(insertDeclarationSQL,
 		symbolId, s.FileId,
 		s.SymbolType,
-		s.Start.Line, s.Start.Column,
-		s.End.Line, s.End.Column,
+		s.Start.Offset,
+		s.End.Offset,
 	)
 	if err != nil {
 		return -1, err
@@ -317,7 +317,7 @@ func (matcher *SymbolMatcher) Match(actual any) (success bool, err error) {
 		return false, nil
 	}
 
-	zeroPosition := token.Position{Line: 0, Column: 0}
+	zeroPosition := token.Position{}
 	if matcher.Expected.Start == zeroPosition && matcher.Expected.End == zeroPosition {
 		return true, nil
 	}
@@ -368,12 +368,12 @@ func (matcher *SymbolMatcher) NegatedFailureMessage(actual any) (message string)
 
 type Reference struct {
 	IndexItemNoResp
-	from   DeclarationId
-	to     token.Position
-	toName string
-	start  token.Position
-	end    token.Position
-	wg     *sync.WaitGroup
+	fromFile FileId
+	to       token.Position
+	toName   string
+	start    token.Position
+	end      token.Position
+	wg       *sync.WaitGroup
 }
 
 type ReferenceResp struct {
@@ -382,8 +382,6 @@ type ReferenceResp struct {
 var _ IndexItem = &Reference{}
 
 func (i *Reference) handle(index *SqlIndex) (interface{}, error) {
-	// First find symbol ID for the `to` symbol.
-
 	defer i.wg.Done()
 
 	row := index.db.QueryRow(
@@ -395,25 +393,26 @@ WHERE files.filesystem_path = ?  AND name = ?`,
 		i.to.Filename,
 		i.toName,
 	)
-	log.Printf("Adding reference from=%s to=%s '%s' %s-%s %s %s",
-		i.from,
+	log.Printf("Adding reference from=%d to=%s '%s' %s-%s %s %s",
+		i.fromFile,
 		i.to, i.toName, i.start, i.end, i.to.Filename, index.project)
 
-	var to SymbolId
-	if err := row.Scan(&to); err != nil {
-		log.Printf("Not Found symbol from=%s '%s' %s-%s %s %s",
-			i.from,
+	var toSymbolId int64
+	if err := row.Scan(&toSymbolId); err != nil {
+		log.Printf("Not Found symbol from=%d '%s' %s-%s %s %s",
+			i.fromFile,
 			i.to, i.start, i.end, i.toName, err)
 		return nil, err
 	}
 
-	log.Printf("Adding reference from=%s to=%s '%s' %s-%s %s %s",
-		i.from,
+	log.Printf("Adding reference from=%d to=%s '%s' %s-%s %s %s",
+		i.fromFile,
 		i.to, i.toName, i.start, i.end, i.to.Filename, index.project)
 	_, err := index.db.Exec(insertReferenceSQL,
-		i.from, to,
-		i.start.Line, i.start.Column,
-		i.end.Column,
+		toSymbolId,
+		i.fromFile,
+		i.start.Offset,
+		i.end.Offset,
 	)
 	if err != nil {
 		return -1, err
@@ -625,9 +624,27 @@ func (i *SqlIndex) FindSymbolId(moduleId ModuleId, fileId FileId, name string, s
 	return results[0].symbolId, results[0].declarationId, nil
 }
 
+func (i *SqlIndex) FindFileId(path string) (FileId, error) {
+	row := i.db.QueryRow(
+		`SELECT files.id FROM files 
+		INNER JOIN modules ON modules.id = files.module 
+		INNER JOIN projects ON projects.id = modules.project_id 
+		WHERE filesystem_path = ? AND projects.id = ?`,
+		path,
+		i.projectId,
+	)
+
+	var fileId FileId
+	if err := row.Scan(&fileId); err != nil {
+		return FileId(-1), err
+	}
+
+	return fileId, nil
+}
+
 func (i *SqlIndex) GetAllSymbols() ([]SymbolDecl, error) {
 	rows, err := i.db.Query(
-		`SELECT symbols.module, symbols.name, symbols.symbol_scope, declarations.file_id, declarations.line_start, declarations.col_start, declarations.line_end, declarations.col_end
+		`SELECT symbols.module, symbols.name, symbols.symbol_scope, declarations.file_id, declarations.start_offset, declarations.end_offset
 FROM ((declarations
 INNER JOIN files ON files.id = declarations.file_id)
 INNER JOIN symbols ON symbols.id = declarations.symbol)`,
@@ -642,12 +659,12 @@ INNER JOIN symbols ON symbols.id = declarations.symbol)`,
 	var symbols []SymbolDecl
 	for rows.Next() {
 		var symbol SymbolDecl
-		var startLine, startColumn, endLine, endColumn int
-		if err := rows.Scan(&symbol.ModuleId, &symbol.Name, &symbol.Scope, &symbol.FileId, &startLine, &startColumn, &endLine, &endColumn); err != nil {
+		var startOffset, endOffset int
+		if err := rows.Scan(&symbol.ModuleId, &symbol.Name, &symbol.Scope, &symbol.FileId, &startOffset, &endOffset); err != nil {
 			return nil, err
 		}
-		symbol.Start = token.Position{Line: startLine, Column: startColumn}
-		symbol.End = token.Position{Line: endLine, Column: endColumn}
+		symbol.Start = token.Position{Offset: startOffset}
+		symbol.End = token.Position{Offset: endOffset}
 		symbols = append(symbols, symbol)
 	}
 	if err := rows.Err(); err != nil {
@@ -656,14 +673,52 @@ INNER JOIN symbols ON symbols.id = declarations.symbol)`,
 	return symbols, nil
 }
 
-func (i *SqlIndex) AddReference(from DeclarationId, to token.Position, toName string, start token.Position, end token.Position) {
+func (i *SqlIndex) FindBuiltinDeclaration(name string) (FileId, token.Position, token.Position, error) {
+	rows := i.db.QueryRow(
+		`SELECT symbols.name, files.id, files.filesystem_path, declarations.start_offset, declarations.end_offset
+FROM declarations
+INNER JOIN files ON files.id = declarations.file_id
+INNER JOIN symbols ON symbols.id = declarations.symbol
+INNER JOIN modules ON modules.id = files.module
+INNER JOIN projects ON projects.id = modules.project_id
+WHERE 
+  symbols.name LIKE ? 
+  AND (files.filesystem_path LIKE '%/builtin/builtin.go' OR files.filesystem_path LIKE '%/src/unsafe/unsafe.go')
+  AND projects.id = ?
+`,
+		fmt.Sprintf("%%%s%%", name),
+		i.projectId,
+	)
+
+	var fileId int64
+	var filePath string
+	var symbolName string
+	var startOffset, endOffset int
+	if err := rows.Scan(&symbolName, &fileId, &filePath, &startOffset, &endOffset); err != nil {
+		return FileId(-1), token.Position{}, token.Position{}, err
+	}
+
+	start := token.Position{Filename: filePath, Offset: startOffset}
+	end := token.Position{Filename: filePath, Offset: endOffset}
+
+	return FileId(fileId), start, end, nil
+}
+
+func (i *SqlIndex) AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+
+	if start.Filename == "" && start.Offset == 0 && start.Line == 0 && start.Column == 0 {
+		log.Printf("Invalid reference start position from=%d to=%s '%s' %s-%s %s",
+			from,
+			to, toName, start, end, to.Filename)
+		panic("Invalid reference start position")
+	}
 
 	i.referencesLog = append(i.referencesLog,
 		&Reference{
 			IndexItemNoResp: NewIndexItemNoResp(),
-			from:            from,
+			fromFile:        from,
 			to:              to,
 			toName:          toName,
 			start:           start,
@@ -762,8 +817,10 @@ func (i *SqlIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 		   to_symbols.name
 		 FROM (((symbol_refs
 		  INNER JOIN symbols AS to_symbols ON symbol_refs.to_symbol = to_symbols.id)
-		   INNER JOIN declarations ON symbol_refs.from_decl = declarations.id)
-		    INNER JOIN symbols AS from_symbols ON from_symbols.id = declarations.symbol)`,
+		   INNER JOIN declarations AS from_decls ON symbol_refs.from_file = from_decls.file_id
+		    AND from_decls.start_offset <= symbol_refs.from_offset_start
+		    AND from_decls.end_offset >= symbol_refs.from_offset_end)
+		    INNER JOIN symbols AS from_symbols ON from_symbols.id = from_decls.symbol)`,
 	)
 	if err != nil {
 		return nil, err

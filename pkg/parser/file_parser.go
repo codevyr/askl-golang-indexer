@@ -168,7 +168,7 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 				pos = f.pkg.Fset.Position(obj.Pos())
 			}
 
-			f.index.AddReference(declId, pos, call, start, end)
+			f.index.AddReference(f.fileId, pos, call, start, end)
 		}
 		return true
 	})

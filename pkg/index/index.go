@@ -217,9 +217,12 @@ type Index interface {
 	FindDeclarationId(name string, scope SymbolScope, symbolType SymbolType) ([]DeclarationId, error)
 	GetAllSymbols() ([]SymbolDecl, error)
 
-	AddReference(from DeclarationId, to token.Position, toName string, start token.Position, end token.Position)
+	AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position)
 	ResolveReferences() error
 	GetAllReferencesNames() ([]*ReferenceNames, error)
+
+	FindBuiltinDeclaration(name string) (FileId, token.Position, token.Position, error)
+	FindFileId(path string) (FileId, error)
 
 	Wait() error
 	Close() error
