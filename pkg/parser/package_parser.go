@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"go/ast"
 	"go/token"
 	"go/types"
 	"log"
@@ -123,4 +124,25 @@ func (b *builtinPkgs) Lookup(name string) (types.Object, token.Position) {
 	}
 
 	return nil, token.Position{}
+}
+
+func (b *builtinPkgs) LookupPosition(name string) (token.Position, bool) {
+	for _, pkg := range b.pkgs {
+		for _, file := range pkg.Syntax {
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Recv != nil || fn.Name == nil {
+					continue
+				}
+				if fn.Name.Name == name {
+					pos := pkg.Fset.Position(fn.Name.Pos())
+					if pos.IsValid() {
+						return pos, true
+					}
+				}
+			}
+		}
+	}
+
+	return token.Position{}, false
 }

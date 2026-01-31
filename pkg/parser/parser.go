@@ -2,6 +2,9 @@ package parser
 
 import (
 	"fmt"
+	"go/ast"
+	"go/token"
+	"go/types"
 	"log"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
@@ -60,6 +63,7 @@ func (p *Parser) Load() error {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.LoadImports | packages.LoadAllSyntax,
 		Dir:  p.packagePath,
+		// BuildFlags: []string{"-tags=cgo"},
 		// Dir, Env, or other settings can be specified if needed
 	}
 
@@ -112,4 +116,59 @@ func (p *Parser) Close() {
 	for i, _ := range p.stages {
 		p.stages[i].Close()
 	}
+}
+
+func (p *Parser) positionForObject(obj types.Object) (token.Position, bool) {
+	if obj == nil {
+		return token.Position{}, false
+	}
+	if obj.Pkg() == nil {
+		return p.builtin.LookupPosition(obj.Name())
+	}
+
+	pkg := p.packageByPath(obj.Pkg().Path())
+	if pkg == nil {
+		return token.Position{}, false
+	}
+
+	if obj.Pos().IsValid() {
+		pos := pkg.Fset.Position(obj.Pos())
+		if pos.IsValid() {
+			return pos, true
+		}
+	}
+
+	return lookupFuncPosition(pkg, obj.Name())
+}
+
+func (p *Parser) packageByPath(path string) *packages.Package {
+	for _, pkg := range p.pkgs {
+		if pkg.Types != nil && pkg.Types.Path() == path {
+			return pkg
+		}
+	}
+	for _, pkg := range p.builtin.pkgs {
+		if pkg.Types != nil && pkg.Types.Path() == path {
+			return pkg
+		}
+	}
+	return nil
+}
+
+func lookupFuncPosition(pkg *packages.Package, name string) (token.Position, bool) {
+	for _, file := range pkg.Syntax {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name == nil {
+				continue
+			}
+			if fn.Name.Name == name {
+				pos := pkg.Fset.Position(fn.Name.Pos())
+				if pos.IsValid() {
+					return pos, true
+				}
+			}
+		}
+	}
+	return token.Position{}, false
 }

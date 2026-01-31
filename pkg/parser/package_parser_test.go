@@ -64,11 +64,8 @@ var _ = Describe("PackageParser", func() {
 	var idx index.Index
 	BeforeEach(func() {
 		var err error
-		idx, err = index.NewSqlIndex(
-			index.WithIndexPath("file::memory:"),
-			index.WithCache(index.CacheModeShared),
+		idx, err = index.NewProtoIndex(
 			index.WithProject("test_project"),
-			index.WithRecreate(true),
 		)
 		Expect(err).ToNot(HaveOccurred(), "Failed to create index")
 	})
@@ -137,6 +134,19 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("primitive_types.MockFunction", "builtin.append"),
 			),
 		),
+		Entry("is generic instantiation", "generic_instantiation/app",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "generic_instantiation/lib.Box[T]).Foo", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "generic_instantiation/app.Doer).Foo", index.ScopeGlobal, index.SymbolTypeDeclaration, nil, nil),
+				index.NewSymbol(3, 3, "generic_instantiation/app.Call", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("generic_instantiation/app.Call", "generic_instantiation/app.Doer).Foo"),
+				index.NewReferenceNames("generic_instantiation/app.Doer).Foo", "generic_instantiation/lib.Box[T]).Foo"),
+			),
+		),
 		Entry("is unsafe", "unsafe",
 			append(
 				builtinSymbols,
@@ -152,6 +162,17 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("unsafe.MockFunction", "builtin.print"),
 				index.NewReferenceNames("unsafe.MockFunction", "builtin.print"),
 				index.NewReferenceNames("unsafe.MockFunction", "builtin.print"),
+			),
+		),
+		Entry("has duplicate interface refs", "duplicate_refs",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "duplicate_refs.DuplicateRefs", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+				index.NewSymbol(3, 3, "duplicate_refs.PathError).Error", index.ScopeGlobal, index.SymbolTypeDefinition, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("(builtin.error).Error", "PathError).Error"),
 			),
 		),
 		Entry("is an interface call", "interface_call",
@@ -559,66 +580,38 @@ var _ = Describe("PackageParser", func() {
 	)
 })
 
-var _ = Describe("MultiProjectIndex", func() {
-	It("indexes two projects into a single DB", func() {
-		tmpFile, err := os.CreateTemp("", "askl-index-*.db")
-		Expect(err).ToNot(HaveOccurred(), "Failed to create temp db file")
-		dbPath := tmpFile.Name()
-		Expect(tmpFile.Close()).To(Succeed())
-		defer os.Remove(dbPath)
-
+var _ = Describe("ProtoIndex", func() {
+	It("indexes a project and can resolve file IDs", func() {
 		cwd, err := os.Getwd()
 		Expect(err).ToNot(HaveOccurred(), "Failed to get current working directory")
-		project1Path := filepath.Join(cwd, "test", "src", "mock1")
-		project2Path := filepath.Join(cwd, "test", "src", "assign_interface")
-
+		projectPath := filepath.Join(cwd, "test", "src", "mock1")
+		projectFile := filepath.Join(projectPath, "mock.go")
 		builtinPath := filepath.Join(runtime.GOROOT(), "src", "builtin", "builtin.go")
 
-		runProject := func(projectName, pkgPath, projectFile string, recreate bool) {
-			idx, err := index.NewSqlIndex(
-				index.WithIndexPath(dbPath),
-				index.WithProject(projectName),
-				index.WithRecreate(recreate),
-			)
-			Expect(err).ToNot(HaveOccurred(), "Failed to create index")
-
-			pkgParser := parser.NewParser(pkgPath, idx)
-			defer pkgParser.Close()
-
-			err = pkgParser.Load()
-			Expect(err).ToNot(HaveOccurred(), "Failed to load parser")
-
-			err = pkgParser.AddPackages()
-			Expect(err).ToNot(HaveOccurred(), "Failed to add packages to parser")
-
-			err = idx.ResolveReferences()
-			Expect(err).ToNot(HaveOccurred(), "Failed to resolve references")
-
-			err = idx.Wait()
-			Expect(err).ToNot(HaveOccurred(), "Failed to wait for index to finish")
-
-			_, err = idx.FindFileId(projectFile)
-			Expect(err).ToNot(HaveOccurred(), "Failed to find project file ID")
-			_, err = idx.FindFileId(builtinPath)
-			Expect(err).ToNot(HaveOccurred(), "Failed to find builtin file ID")
-
-			err = idx.Close()
-			Expect(err).ToNot(HaveOccurred(), "Failed to close index")
-		}
-
-		runProject("project_one", project1Path, filepath.Join(project1Path, "mock.go"), true)
-		runProject("project_two", project2Path, filepath.Join(project2Path, "assign_interface.go"), false)
-
-		idx, err := index.NewSqlIndex(
-			index.WithIndexPath(dbPath),
+		idx, err := index.NewProtoIndex(
 			index.WithProject("project_one"),
 		)
-		Expect(err).ToNot(HaveOccurred(), "Failed to re-open index for project_one")
+		Expect(err).ToNot(HaveOccurred(), "Failed to create index")
 		defer idx.Close()
 
-		_, err = idx.FindFileId(filepath.Join(project1Path, "mock.go"))
-		Expect(err).ToNot(HaveOccurred(), "Failed to find project_one file ID after second project")
+		pkgParser := parser.NewParser(projectPath, idx)
+		defer pkgParser.Close()
+
+		err = pkgParser.Load()
+		Expect(err).ToNot(HaveOccurred(), "Failed to load parser")
+
+		err = pkgParser.AddPackages()
+		Expect(err).ToNot(HaveOccurred(), "Failed to add packages to parser")
+
+		err = idx.ResolveReferences()
+		Expect(err).ToNot(HaveOccurred(), "Failed to resolve references")
+
+		err = idx.Wait()
+		Expect(err).ToNot(HaveOccurred(), "Failed to wait for index to finish")
+
+		_, err = idx.FindFileId(projectFile)
+		Expect(err).ToNot(HaveOccurred(), "Failed to find project file ID")
 		_, err = idx.FindFileId(builtinPath)
-		Expect(err).ToNot(HaveOccurred(), "Failed to find builtin file ID after second project")
+		Expect(err).ToNot(HaveOccurred(), "Failed to find builtin file ID")
 	})
 })

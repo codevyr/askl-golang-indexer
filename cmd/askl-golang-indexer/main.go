@@ -57,11 +57,7 @@ const (
 )
 
 func parseModule(flags Flags, packageType ModuleType) error {
-	index, err := index.NewSqlIndex(
-		index.WithIndexPath(flags.indexPath),
-		index.WithRecreate(true),
-		index.WithJournal(index.JournalModeOff),
-		index.WithSynchronous(index.SynchronousModeOff),
+	index, err := index.NewProtoIndex(
 		index.WithProject(flags.projectName),
 	)
 	if err != nil {
@@ -99,6 +95,21 @@ func parseModule(flags Flags, packageType ModuleType) error {
 		return err
 	}
 
+	err = index.Wait()
+	if err != nil {
+		return err
+	}
+
+	payload, err := index.Marshal()
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(flags.indexPath, payload, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to write index to %s: %w", flags.indexPath, err)
+	}
+
 	return nil
 }
 
@@ -132,8 +143,8 @@ func main() {
 			},
 			&cli.StringFlag{
 				Name:        "index",
-				Value:       "index.db",
-				Usage:       "`INDEX` where to store the resulting index",
+				Value:       "index.pb",
+				Usage:       "`INDEX` file where to store the resulting protobuf index",
 				Destination: &flags.indexPath,
 			},
 			&cli.StringFlag{

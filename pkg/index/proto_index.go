@@ -1,0 +1,568 @@
+package index
+
+import (
+	"crypto/sha512"
+	"fmt"
+	"go/token"
+	"log"
+	"math"
+	"strings"
+	"sync"
+
+	"google.golang.org/protobuf/proto"
+
+	"github.com/planetA/askl-golang-indexer/pkg/indexpb"
+)
+
+type fileKey struct {
+	moduleID int64
+	path     string
+}
+
+type symbolKey struct {
+	moduleID int64
+	name     string
+	scope    SymbolScope
+}
+
+type fileNameKey struct {
+	filePath string
+	name     string
+}
+
+type declKey struct {
+	symbolID int64
+	fileID   int64
+	start    int
+	end      int
+}
+
+type declLookupKey struct {
+	name       string
+	scope      SymbolScope
+	symbolType SymbolType
+}
+
+type declEntry struct {
+	symbolID   int64
+	fileID     int64
+	symbolType SymbolType
+	start      int
+	end        int
+	declID     DeclarationId
+}
+
+type referenceLog struct {
+	fromFile FileId
+	to       token.Position
+	toName   string
+	start    token.Position
+	end      token.Position
+}
+
+type ProtoIndex struct {
+	mu sync.Mutex
+
+	projectName string
+	upload      *indexpb.IndexUpload
+
+	nextModuleID int64
+	nextFileID   int64
+	nextSymbolID int64
+	nextDeclID   int64
+
+	modulesByName map[string]int64
+	moduleByID    map[int64]*indexpb.Module
+
+	filesByKey    map[fileKey]int64
+	fileByID      map[int64]*indexpb.File
+	filePathByID  map[int64]string
+	fileIDByPath  map[string]int64
+	fileHashByKey map[fileKey]string
+
+	symbolByKey         map[symbolKey]int64
+	symbolByID          map[int64]*indexpb.Symbol
+	symbolNameByID      map[int64]string
+	symbolModuleIDByID  map[int64]int64
+	symbolByFileAndName map[fileNameKey]int64
+
+	declIDByKey   map[declKey]DeclarationId
+	declsByFile   map[int64][]declEntry
+	declsByLookup map[declLookupKey][]DeclarationId
+	referencesLog []referenceLog
+}
+
+var _ Index = &ProtoIndex{}
+
+func NewProtoIndex(options ...Option) (*ProtoIndex, error) {
+	var config Config
+	for _, option := range options {
+		option.apply(&config)
+	}
+
+	idx := &ProtoIndex{
+		projectName: config.project,
+		upload: &indexpb.IndexUpload{
+			ProjectName: config.project,
+		},
+		nextModuleID:        1,
+		nextFileID:          1,
+		nextSymbolID:        1,
+		nextDeclID:          1,
+		modulesByName:       make(map[string]int64),
+		moduleByID:          make(map[int64]*indexpb.Module),
+		filesByKey:          make(map[fileKey]int64),
+		fileByID:            make(map[int64]*indexpb.File),
+		filePathByID:        make(map[int64]string),
+		fileIDByPath:        make(map[string]int64),
+		fileHashByKey:       make(map[fileKey]string),
+		symbolByKey:         make(map[symbolKey]int64),
+		symbolByID:          make(map[int64]*indexpb.Symbol),
+		symbolNameByID:      make(map[int64]string),
+		symbolModuleIDByID:  make(map[int64]int64),
+		symbolByFileAndName: make(map[fileNameKey]int64),
+		declIDByKey:         make(map[declKey]DeclarationId),
+		declsByFile:         make(map[int64][]declEntry),
+		declsByLookup:       make(map[declLookupKey][]DeclarationId),
+		referencesLog:       []referenceLog{},
+	}
+
+	return idx, nil
+}
+
+func (i *ProtoIndex) Marshal() ([]byte, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	return proto.Marshal(i.upload)
+}
+
+func (i *ProtoIndex) Upload() *indexpb.IndexUpload {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	return proto.Clone(i.upload).(*indexpb.IndexUpload)
+}
+
+func computeHash(contents []byte) string {
+	return fmt.Sprintf("%x", sha512.Sum512(contents))
+}
+
+func toProtoScope(scope SymbolScope) indexpb.SymbolScope {
+	switch scope {
+	case ScopeLocal:
+		return indexpb.SymbolScope_LOCAL
+	case ScopeGlobal:
+		return indexpb.SymbolScope_GLOBAL
+	default:
+		return indexpb.SymbolScope_SYMBOL_SCOPE_UNSPECIFIED
+	}
+}
+
+func fromProtoScope(scope indexpb.SymbolScope) SymbolScope {
+	switch scope {
+	case indexpb.SymbolScope_LOCAL:
+		return ScopeLocal
+	case indexpb.SymbolScope_GLOBAL:
+		return ScopeGlobal
+	default:
+		return 0
+	}
+}
+
+func toProtoType(symbolType SymbolType) indexpb.SymbolType {
+	switch symbolType {
+	case SymbolTypeDefinition:
+		return indexpb.SymbolType_DEFINITION
+	case SymbolTypeDeclaration:
+		return indexpb.SymbolType_DECLARATION
+	default:
+		return indexpb.SymbolType_SYMBOL_TYPE_UNSPECIFIED
+	}
+}
+
+func (i *ProtoIndex) AddModule(moduleName string) (ModuleId, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	if moduleID, ok := i.modulesByName[moduleName]; ok {
+		return ModuleId(moduleID), nil
+	}
+
+	moduleID := i.nextModuleID
+	i.nextModuleID++
+
+	module := &indexpb.Module{
+		LocalId:    moduleID,
+		ModuleName: moduleName,
+	}
+
+	i.modulesByName[moduleName] = moduleID
+	i.moduleByID[moduleID] = module
+	i.upload.Modules = append(i.upload.Modules, module)
+
+	return ModuleId(moduleID), nil
+}
+
+func (i *ProtoIndex) AddFile(moduleId ModuleId, pkgDir, path string, contents []byte) (FileId, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	module := i.moduleByID[int64(moduleId)]
+	if module == nil {
+		return FileId(-1), fmt.Errorf("module %d not found", moduleId)
+	}
+
+	key := fileKey{moduleID: int64(moduleId), path: path}
+	if fileID, ok := i.filesByKey[key]; ok {
+		currentHash := computeHash(contents)
+		storedHash := i.fileHashByKey[key]
+		if currentHash != storedHash {
+			return FileId(-1), fmt.Errorf("content hash mismatch for file %v", path)
+		}
+		return FileId(fileID), nil
+	}
+
+	modulePath, ok := strings.CutPrefix(path, pkgDir)
+	if !ok {
+		log.Printf("file %v is not in the directory %v", path, pkgDir)
+		modulePath = path
+	}
+
+	fileID := i.nextFileID
+	i.nextFileID++
+
+	file := &indexpb.File{
+		LocalId:        fileID,
+		ModulePath:     modulePath,
+		FilesystemPath: path,
+		Filetype:       goFileType,
+		Content:        contents,
+		Declarations:   []*indexpb.Declaration{},
+		Refs:           []*indexpb.SymbolRef{},
+	}
+
+	module.Files = append(module.Files, file)
+	fileHash := computeHash(contents)
+
+	i.filesByKey[key] = fileID
+	i.fileByID[fileID] = file
+	i.filePathByID[fileID] = path
+	i.fileIDByPath[path] = fileID
+	i.fileHashByKey[key] = fileHash
+
+	return FileId(fileID), nil
+}
+
+func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, DeclarationId, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	module := i.moduleByID[int64(moduleId)]
+	if module == nil {
+		return -1, -1, fmt.Errorf("module %d not found", moduleId)
+	}
+
+	file := i.fileByID[int64(fileId)]
+	if file == nil {
+		return -1, -1, fmt.Errorf("file %d not found", fileId)
+	}
+
+	symKey := symbolKey{moduleID: int64(moduleId), name: name, scope: scope}
+	symbolID, ok := i.symbolByKey[symKey]
+	if !ok {
+		symbolID = i.nextSymbolID
+		i.nextSymbolID++
+
+		symbol := &indexpb.Symbol{
+			LocalId: symbolID,
+			Name:    name,
+			Scope:   toProtoScope(scope),
+		}
+
+		module.Symbols = append(module.Symbols, symbol)
+		i.symbolByKey[symKey] = symbolID
+		i.symbolByID[symbolID] = symbol
+		i.symbolNameByID[symbolID] = name
+		i.symbolModuleIDByID[symbolID] = int64(moduleId)
+	}
+
+	filePath := i.filePathByID[int64(fileId)]
+	if filePath != "" {
+		i.symbolByFileAndName[fileNameKey{filePath: filePath, name: name}] = symbolID
+	}
+
+	key := declKey{symbolID: symbolID, fileID: int64(fileId), start: start.Offset, end: end.Offset}
+	if declID, ok := i.declIDByKey[key]; ok {
+		return SymbolId(symbolID), declID, nil
+	}
+
+	if symbolType == 0 {
+		return -1, -1, fmt.Errorf("SymbolType is not set for symbol %s in file %d", name, fileId)
+	}
+	if start.Offset > math.MaxInt32 || start.Offset < 0 {
+		return -1, -1, fmt.Errorf("start offset out of range for %s", name)
+	}
+	if end.Offset > math.MaxInt32 || end.Offset < 0 {
+		return -1, -1, fmt.Errorf("end offset out of range for %s", name)
+	}
+
+	declID := DeclarationId(i.nextDeclID)
+	i.nextDeclID++
+
+	file.Declarations = append(file.Declarations, &indexpb.Declaration{
+		SymbolLocalId: symbolID,
+		SymbolType:    toProtoType(symbolType),
+		StartOffset:   int32(start.Offset),
+		EndOffset:     int32(end.Offset),
+	})
+
+	entry := declEntry{
+		symbolID:   symbolID,
+		fileID:     int64(fileId),
+		symbolType: symbolType,
+		start:      start.Offset,
+		end:        end.Offset,
+		declID:     declID,
+	}
+	i.declsByFile[int64(fileId)] = append(i.declsByFile[int64(fileId)], entry)
+	i.declIDByKey[key] = declID
+
+	lookupKey := declLookupKey{name: name, scope: scope, symbolType: symbolType}
+	i.declsByLookup[lookupKey] = append(i.declsByLookup[lookupKey], declID)
+
+	return SymbolId(symbolID), declID, nil
+}
+
+func (i *ProtoIndex) FindDeclarationId(name string, scope SymbolScope, symbolType SymbolType) ([]DeclarationId, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	key := declLookupKey{name: name, scope: scope, symbolType: symbolType}
+	decls := i.declsByLookup[key]
+	if len(decls) == 0 {
+		return []DeclarationId{}, nil
+	}
+	out := make([]DeclarationId, len(decls))
+	copy(out, decls)
+	return out, nil
+}
+
+func (i *ProtoIndex) FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, DeclarationId, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	symbolID, ok := i.symbolByKey[symbolKey{moduleID: int64(moduleId), name: name, scope: scope}]
+	if !ok {
+		return SymbolId(-1), DeclarationId(-1), fmt.Errorf("symbol not found")
+	}
+
+	decls := i.declsByFile[int64(fileId)]
+	var matches []declEntry
+	for _, decl := range decls {
+		if decl.symbolID == symbolID && decl.symbolType == symbolType {
+			matches = append(matches, decl)
+		}
+	}
+
+	if len(matches) != 1 {
+		return SymbolId(-1), DeclarationId(-1), fmt.Errorf("expected 1 symbol, found %d", len(matches))
+	}
+
+	return SymbolId(symbolID), matches[0].declID, nil
+}
+
+func (i *ProtoIndex) FindFileId(path string) (FileId, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	fileID, ok := i.fileIDByPath[path]
+	if !ok {
+		return FileId(-1), fmt.Errorf("file not found: %s", path)
+	}
+
+	return FileId(fileID), nil
+}
+
+func (i *ProtoIndex) GetAllSymbols() ([]SymbolDecl, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	symbols := []SymbolDecl{}
+	for fileID, decls := range i.declsByFile {
+		for _, decl := range decls {
+			symbol := i.symbolByID[decl.symbolID]
+			if symbol == nil {
+				continue
+			}
+			moduleID := i.symbolModuleIDByID[decl.symbolID]
+			symbols = append(symbols, SymbolDecl{
+				ModuleId:   ModuleId(moduleID),
+				FileId:     FileId(fileID),
+				Name:       symbol.Name,
+				Scope:      fromProtoScope(symbol.Scope),
+				SymbolType: decl.symbolType,
+				Start:      token.Position{Offset: decl.start},
+				End:        token.Position{Offset: decl.end},
+			})
+		}
+	}
+	return symbols, nil
+}
+
+func (i *ProtoIndex) FindBuiltinDeclaration(name string) (FileId, token.Position, token.Position, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	for fileID, decls := range i.declsByFile {
+		filePath := i.filePathByID[fileID]
+		if !isBuiltinPath(filePath) {
+			continue
+		}
+		for _, decl := range decls {
+			symbol := i.symbolByID[decl.symbolID]
+			if symbol == nil {
+				continue
+			}
+			if !strings.Contains(symbol.Name, name) {
+				continue
+			}
+
+			start := token.Position{Filename: filePath, Offset: decl.start}
+			end := token.Position{Filename: filePath, Offset: decl.end}
+			return FileId(fileID), start, end, nil
+		}
+	}
+
+	return FileId(-1), token.Position{}, token.Position{}, fmt.Errorf("builtin declaration not found for %s", name)
+}
+
+func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position) error {
+	if start.Filename == "" && start.Offset == 0 && start.Line == 0 && start.Column == 0 {
+		return fmt.Errorf("invalid reference start position: from=%d to=%s '%s' %s-%s %s",
+			from,
+			to, toName, start, end, to.Filename)
+	}
+	if !to.IsValid() {
+		return fmt.Errorf("invalid reference to position: from=%d to=%s '%s' %s-%s %s",
+			from,
+			to, toName, start, end, to.Filename)
+	}
+
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	i.referencesLog = append(i.referencesLog, referenceLog{
+		fromFile: from,
+		to:       to,
+		toName:   toName,
+		start:    start,
+		end:      end,
+	})
+
+	return nil
+}
+
+func (i *ProtoIndex) ResolveReferences() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	seen := make(map[refDedupKey]struct{})
+	for _, ref := range i.referencesLog {
+		key := fileNameKey{filePath: ref.to.Filename, name: ref.toName}
+		toSymbolID, ok := i.symbolByFileAndName[key]
+		if !ok {
+			if isCReference(ref) {
+				continue
+			}
+			fromFile := i.fileByID[int64(ref.fromFile)]
+			return fmt.Errorf("strict reference resolution failed for %s:%d:%d -> %s in %s:%d:%d KEY %+s", fromFile.FilesystemPath, ref.start.Line, ref.start.Column, ref.toName, ref.to.Filename, ref.to.Line, ref.to.Column, key)
+		}
+
+		file := i.fileByID[int64(ref.fromFile)]
+		if file == nil {
+			log.Printf("reference from file not found: %d", ref.fromFile)
+			continue
+		}
+		if ref.start.Offset > math.MaxInt32 || ref.start.Offset < 0 {
+			log.Printf("reference start offset out of range: %d", ref.start.Offset)
+			continue
+		}
+		if ref.end.Offset > math.MaxInt32 || ref.end.Offset < 0 {
+			log.Printf("reference end offset out of range: %d", ref.end.Offset)
+			continue
+		}
+
+		dedupKey := refDedupKey{
+			toSymbolID: toSymbolID,
+			fromFile:   int64(ref.fromFile),
+			start:      int32(ref.start.Offset),
+			end:        int32(ref.end.Offset),
+		}
+		if _, ok := seen[dedupKey]; ok {
+			continue
+		}
+		seen[dedupKey] = struct{}{}
+
+		file.Refs = append(file.Refs, &indexpb.SymbolRef{
+			ToSymbolLocalId: toSymbolID,
+			FromOffsetStart: int32(ref.start.Offset),
+			FromOffsetEnd:   int32(ref.end.Offset),
+		})
+	}
+
+	i.referencesLog = nil
+
+	return nil
+}
+
+type refDedupKey struct {
+	toSymbolID int64
+	fromFile   int64
+	start      int32
+	end        int32
+}
+
+func (i *ProtoIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	var references []*ReferenceNames
+	for fileID, file := range i.fileByID {
+		if len(file.Refs) == 0 {
+			continue
+		}
+		decls := i.declsByFile[fileID]
+		for _, ref := range file.Refs {
+			toName := i.symbolNameByID[ref.ToSymbolLocalId]
+			for _, decl := range decls {
+				if decl.start <= int(ref.FromOffsetStart) && decl.end >= int(ref.FromOffsetEnd) {
+					fromName := i.symbolNameByID[decl.symbolID]
+					references = append(references, &ReferenceNames{
+						From: fromName,
+						To:   toName,
+					})
+				}
+			}
+		}
+	}
+
+	return references, nil
+}
+
+func (i *ProtoIndex) Wait() error {
+	return nil
+}
+
+func (i *ProtoIndex) Close() error {
+	return nil
+}
+
+func isBuiltinPath(path string) bool {
+	return strings.HasSuffix(path, "/builtin/builtin.go") ||
+		strings.HasSuffix(path, "/src/unsafe/unsafe.go")
+}
+
+func isCReference(ref referenceLog) bool {
+	return strings.HasPrefix(ref.toName, "C.")
+}

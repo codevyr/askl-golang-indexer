@@ -83,6 +83,10 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 
 	// Traverse the function body
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if err != nil {
+			return false
+		}
+
 		var recurse bool
 		if callExpr, ok := n.(*ast.CallExpr); ok {
 			start := f.pkg.Fset.Position(n.Pos())
@@ -145,9 +149,15 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 				if !ok {
 					log.Fatalf("Failed to find type for %s in %s", ident.Name, f.filepath)
 				}
+				if typeValue.IsType() {
+					// Type conversions are not references.
+					return true
+				}
 				if typeValue.IsBuiltin() {
 					obj, pos = parser.parser.builtin.Lookup(ident.Name)
 					call = obj.Id()
+				} else {
+					return true
 				}
 			} else {
 				switch obj := obj.(type) {
@@ -168,7 +178,18 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 				pos = f.pkg.Fset.Position(obj.Pos())
 			}
 
-			f.index.AddReference(f.fileId, pos, call, start, end)
+			if !pos.IsValid() {
+				fallbackPos, ok := parser.parser.positionForObject(obj)
+				if !ok {
+					return true
+				}
+				pos = fallbackPos
+			}
+
+			err = f.index.AddReference(f.fileId, pos, call, start, end)
+			if err != nil {
+				return false
+			}
 		}
 		return true
 	})
@@ -194,7 +215,10 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 		return false, fmt.Errorf("failed to add symbol: %s", err)
 	}
 
-	f.functionBodyParser(parser, fn, declId)
+	err = f.functionBodyParser(parser, fn, declId)
+	if err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
@@ -244,6 +268,10 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec) bool
 func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 
 	ast.Inspect(f.ast, func(n ast.Node) bool {
+		if err != nil {
+			return false
+		}
+
 		var recurse bool
 		switch n := n.(type) {
 		case *ast.FuncLit:
@@ -274,7 +302,7 @@ func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 		}
 	})
 
-	return nil
+	return
 }
 
 func (p *FileParser) GetId() (string, bool) {

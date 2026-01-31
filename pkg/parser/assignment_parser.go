@@ -64,7 +64,7 @@ func getMethodName(method *types.Func) string {
 		return "<nil>"
 	}
 	if method.Pkg() != nil {
-		return method.FullName()
+		return method.Origin().FullName()
 	}
 
 	// If the method is not associated with a package, most likely it's a
@@ -89,7 +89,8 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 	for _, lhsMethod := range lhsMethodNames {
 		lhsMethodName := getMethodName(lhsMethod)
 		for _, rhsMethod := range rhsMethodNames {
-			if lhsMethodName == rhsMethod.FullName() {
+			rhsMethodName := getMethodName(rhsMethod)
+			if lhsMethodName == rhsMethodName {
 				// assignment to the same type, skip
 				continue
 			}
@@ -101,7 +102,7 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 
 				if lhsMethod.Pos().IsValid() {
 					start = f.pkg.Fset.Position(lhsMethod.Pos())
-					end = f.pkg.Fset.Position(lhsMethod.Pos())
+					end = f.pkg.Fset.Position(lhsMethod.Pos() + 1) // approximate end position
 					fileId, err = f.index.FindFileId(start.Filename)
 					if err != nil {
 						return fmt.Errorf("failed to find file ID for %s: %w", start.Filename, err)
@@ -113,7 +114,10 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 					}
 				}
 
-				f.index.AddReference(fileId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethod.FullName(), start, end)
+				err = f.index.AddReference(fileId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethodName, start, end)
+				if err != nil {
+					return fmt.Errorf("failed to add reference: %w", err)
+				}
 			}
 		}
 	}

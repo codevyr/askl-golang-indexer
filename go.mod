@@ -3,12 +3,12 @@ module github.com/planetA/askl-golang-indexer
 go 1.24.1
 
 require (
-	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0
 	github.com/urfave/cli/v3 v3.0.0-beta1
 	golang.org/x/mod v0.24.0
 	golang.org/x/tools v0.31.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
