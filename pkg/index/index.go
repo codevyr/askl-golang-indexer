@@ -6,11 +6,12 @@ import (
 )
 
 const (
-	goFileType = "go"
+	GoFileType = "go"
 )
 
 type Config struct {
-	project string
+	project  string
+	rootPath string
 }
 
 type Option interface {
@@ -27,6 +28,18 @@ type projectOption struct {
 
 func (o *projectOption) apply(config *Config) {
 	config.project = o.project
+}
+
+func WithRootPath(rootPath string) Option {
+	return &rootPathOption{rootPath: rootPath}
+}
+
+type rootPathOption struct {
+	rootPath string
+}
+
+func (o *rootPathOption) apply(config *Config) {
+	config.rootPath = o.rootPath
 }
 
 type SymbolScope int
@@ -76,7 +89,7 @@ func (id DeclarationId) String() string {
 
 type Index interface {
 	AddModule(moduleName string) (ModuleId, error)
-	AddFile(moduleId ModuleId, pkgDir, path string, contents []byte) (FileId, error)
+	AddFile(moduleId *ModuleId, baseDir, path, filetype string, contents []byte) (FileId, error)
 
 	AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, DeclarationId, error)
 	FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, DeclarationId, error)

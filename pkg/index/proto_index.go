@@ -14,11 +14,6 @@ import (
 	"github.com/planetA/askl-golang-indexer/pkg/indexpb"
 )
 
-type fileKey struct {
-	moduleID int64
-	path     string
-}
-
 type symbolKey struct {
 	moduleID int64
 	name     string
@@ -64,7 +59,8 @@ type ProtoIndex struct {
 	mu sync.Mutex
 
 	projectName string
-	upload      *indexpb.IndexUpload
+	rootPath    string
+	project     *indexpb.Project
 
 	nextModuleID int64
 	nextFileID   int64
@@ -74,11 +70,10 @@ type ProtoIndex struct {
 	modulesByName map[string]int64
 	moduleByID    map[int64]*indexpb.Module
 
-	filesByKey    map[fileKey]int64
 	fileByID      map[int64]*indexpb.File
 	filePathByID  map[int64]string
 	fileIDByPath  map[string]int64
-	fileHashByKey map[fileKey]string
+	fileHashByPath map[string]string
 
 	symbolByKey         map[symbolKey]int64
 	symbolByID          map[int64]*indexpb.Symbol
@@ -102,8 +97,10 @@ func NewProtoIndex(options ...Option) (*ProtoIndex, error) {
 
 	idx := &ProtoIndex{
 		projectName: config.project,
-		upload: &indexpb.IndexUpload{
+		rootPath:    config.rootPath,
+		project: &indexpb.Project{
 			ProjectName: config.project,
+			RootPath:    config.rootPath,
 		},
 		nextModuleID:        1,
 		nextFileID:          1,
@@ -111,11 +108,10 @@ func NewProtoIndex(options ...Option) (*ProtoIndex, error) {
 		nextDeclID:          1,
 		modulesByName:       make(map[string]int64),
 		moduleByID:          make(map[int64]*indexpb.Module),
-		filesByKey:          make(map[fileKey]int64),
 		fileByID:            make(map[int64]*indexpb.File),
 		filePathByID:        make(map[int64]string),
 		fileIDByPath:        make(map[string]int64),
-		fileHashByKey:       make(map[fileKey]string),
+		fileHashByPath:      make(map[string]string),
 		symbolByKey:         make(map[symbolKey]int64),
 		symbolByID:          make(map[int64]*indexpb.Symbol),
 		symbolNameByID:      make(map[int64]string),
@@ -134,14 +130,14 @@ func (i *ProtoIndex) Marshal() ([]byte, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	return proto.Marshal(i.upload)
+	return proto.Marshal(i.project)
 }
 
-func (i *ProtoIndex) Upload() *indexpb.IndexUpload {
+func (i *ProtoIndex) Upload() *indexpb.Project {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	return proto.Clone(i.upload).(*indexpb.IndexUpload)
+	return proto.Clone(i.project).(*indexpb.Project)
 }
 
 func computeHash(contents []byte) string {
@@ -199,34 +195,39 @@ func (i *ProtoIndex) AddModule(moduleName string) (ModuleId, error) {
 
 	i.modulesByName[moduleName] = moduleID
 	i.moduleByID[moduleID] = module
-	i.upload.Modules = append(i.upload.Modules, module)
+	i.project.Modules = append(i.project.Modules, module)
 
 	return ModuleId(moduleID), nil
 }
 
-func (i *ProtoIndex) AddFile(moduleId ModuleId, pkgDir, path string, contents []byte) (FileId, error) {
+func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string, contents []byte) (FileId, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	module := i.moduleByID[int64(moduleId)]
-	if module == nil {
-		return FileId(-1), fmt.Errorf("module %d not found", moduleId)
+	if moduleId != nil {
+		module := i.moduleByID[int64(*moduleId)]
+		if module == nil {
+			return FileId(-1), fmt.Errorf("module %d not found", *moduleId)
+		}
 	}
 
-	key := fileKey{moduleID: int64(moduleId), path: path}
-	if fileID, ok := i.filesByKey[key]; ok {
+	if fileID, ok := i.fileIDByPath[path]; ok {
 		currentHash := computeHash(contents)
-		storedHash := i.fileHashByKey[key]
+		storedHash := i.fileHashByPath[path]
 		if currentHash != storedHash {
 			return FileId(-1), fmt.Errorf("content hash mismatch for file %v", path)
 		}
 		return FileId(fileID), nil
 	}
 
-	modulePath, ok := strings.CutPrefix(path, pkgDir)
-	if !ok {
-		log.Printf("file %v is not in the directory %v", path, pkgDir)
-		modulePath = path
+	modulePath := path
+	if baseDir != "" {
+		relPath, ok := strings.CutPrefix(path, baseDir)
+		if !ok {
+			log.Printf("file %v is not in the directory %v", path, baseDir)
+		} else {
+			modulePath = relPath
+		}
 	}
 
 	fileID := i.nextFileID
@@ -234,22 +235,26 @@ func (i *ProtoIndex) AddFile(moduleId ModuleId, pkgDir, path string, contents []
 
 	file := &indexpb.File{
 		LocalId:        fileID,
+		ModuleId:       nil,
 		ModulePath:     modulePath,
 		FilesystemPath: path,
-		Filetype:       goFileType,
+		Filetype:       filetype,
 		Content:        contents,
 		Declarations:   []*indexpb.Declaration{},
 		Refs:           []*indexpb.SymbolRef{},
 	}
 
-	module.Files = append(module.Files, file)
+	if moduleId != nil {
+		moduleValue := int64(*moduleId)
+		file.ModuleId = &moduleValue
+	}
+	i.project.Files = append(i.project.Files, file)
 	fileHash := computeHash(contents)
 
-	i.filesByKey[key] = fileID
 	i.fileByID[fileID] = file
 	i.filePathByID[fileID] = path
 	i.fileIDByPath[path] = fileID
-	i.fileHashByKey[key] = fileHash
+	i.fileHashByPath[path] = fileHash
 
 	return FileId(fileID), nil
 }

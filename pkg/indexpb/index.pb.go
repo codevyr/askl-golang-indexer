@@ -119,28 +119,30 @@ func (SymbolType) EnumDescriptor() ([]byte, []int) {
 	return file_proto_index_proto_rawDescGZIP(), []int{1}
 }
 
-type IndexUpload struct {
+type Project struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ProjectName   string                 `protobuf:"bytes,1,opt,name=project_name,json=projectName,proto3" json:"project_name,omitempty"`
-	Modules       []*Module              `protobuf:"bytes,2,rep,name=modules,proto3" json:"modules,omitempty"`
+	RootPath      string                 `protobuf:"bytes,2,opt,name=root_path,json=rootPath,proto3" json:"root_path,omitempty"`
+	Modules       []*Module              `protobuf:"bytes,3,rep,name=modules,proto3" json:"modules,omitempty"`
+	Files         []*File                `protobuf:"bytes,4,rep,name=files,proto3" json:"files,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *IndexUpload) Reset() {
-	*x = IndexUpload{}
+func (x *Project) Reset() {
+	*x = Project{}
 	mi := &file_proto_index_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *IndexUpload) String() string {
+func (x *Project) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*IndexUpload) ProtoMessage() {}
+func (*Project) ProtoMessage() {}
 
-func (x *IndexUpload) ProtoReflect() protoreflect.Message {
+func (x *Project) ProtoReflect() protoreflect.Message {
 	mi := &file_proto_index_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -152,21 +154,35 @@ func (x *IndexUpload) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use IndexUpload.ProtoReflect.Descriptor instead.
-func (*IndexUpload) Descriptor() ([]byte, []int) {
+// Deprecated: Use Project.ProtoReflect.Descriptor instead.
+func (*Project) Descriptor() ([]byte, []int) {
 	return file_proto_index_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *IndexUpload) GetProjectName() string {
+func (x *Project) GetProjectName() string {
 	if x != nil {
 		return x.ProjectName
 	}
 	return ""
 }
 
-func (x *IndexUpload) GetModules() []*Module {
+func (x *Project) GetRootPath() string {
+	if x != nil {
+		return x.RootPath
+	}
+	return ""
+}
+
+func (x *Project) GetModules() []*Module {
 	if x != nil {
 		return x.Modules
+	}
+	return nil
+}
+
+func (x *Project) GetFiles() []*File {
+	if x != nil {
+		return x.Files
 	}
 	return nil
 }
@@ -175,8 +191,7 @@ type Module struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	LocalId       int64                  `protobuf:"varint,1,opt,name=local_id,json=localId,proto3" json:"local_id,omitempty"` // Unique within project
 	ModuleName    string                 `protobuf:"bytes,2,opt,name=module_name,json=moduleName,proto3" json:"module_name,omitempty"`
-	Files         []*File                `protobuf:"bytes,3,rep,name=files,proto3" json:"files,omitempty"`
-	Symbols       []*Symbol              `protobuf:"bytes,4,rep,name=symbols,proto3" json:"symbols,omitempty"`
+	Symbols       []*Symbol              `protobuf:"bytes,3,rep,name=symbols,proto3" json:"symbols,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -225,13 +240,6 @@ func (x *Module) GetModuleName() string {
 	return ""
 }
 
-func (x *Module) GetFiles() []*File {
-	if x != nil {
-		return x.Files
-	}
-	return nil
-}
-
 func (x *Module) GetSymbols() []*Symbol {
 	if x != nil {
 		return x.Symbols
@@ -241,13 +249,14 @@ func (x *Module) GetSymbols() []*Symbol {
 
 type File struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	LocalId        int64                  `protobuf:"varint,1,opt,name=local_id,json=localId,proto3" json:"local_id,omitempty"` // Unique within project
-	ModulePath     string                 `protobuf:"bytes,2,opt,name=module_path,json=modulePath,proto3" json:"module_path,omitempty"`
-	FilesystemPath string                 `protobuf:"bytes,3,opt,name=filesystem_path,json=filesystemPath,proto3" json:"filesystem_path,omitempty"` // Metadata only, never used for filesystem access
-	Filetype       string                 `protobuf:"bytes,4,opt,name=filetype,proto3" json:"filetype,omitempty"`
-	Content        []byte                 `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`           // File content (content_hash computed server-side)
-	Declarations   []*Declaration         `protobuf:"bytes,6,rep,name=declarations,proto3" json:"declarations,omitempty"` // Declarations in this file
-	Refs           []*SymbolRef           `protobuf:"bytes,7,rep,name=refs,proto3" json:"refs,omitempty"`                 // References from this file
+	LocalId        int64                  `protobuf:"varint,1,opt,name=local_id,json=localId,proto3" json:"local_id,omitempty"`          // Unique within project
+	ModuleId       *int64                 `protobuf:"varint,2,opt,name=module_id,json=moduleId,proto3,oneof" json:"module_id,omitempty"` // References Module.local_id when set
+	ModulePath     string                 `protobuf:"bytes,3,opt,name=module_path,json=modulePath,proto3" json:"module_path,omitempty"`
+	FilesystemPath string                 `protobuf:"bytes,4,opt,name=filesystem_path,json=filesystemPath,proto3" json:"filesystem_path,omitempty"` // Metadata only, never used for filesystem access
+	Filetype       string                 `protobuf:"bytes,5,opt,name=filetype,proto3" json:"filetype,omitempty"`
+	Content        []byte                 `protobuf:"bytes,6,opt,name=content,proto3" json:"content,omitempty"`           // File content (content_hash computed server-side)
+	Declarations   []*Declaration         `protobuf:"bytes,7,rep,name=declarations,proto3" json:"declarations,omitempty"` // Declarations in this file
+	Refs           []*SymbolRef           `protobuf:"bytes,8,rep,name=refs,proto3" json:"refs,omitempty"`                 // References from this file
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -285,6 +294,13 @@ func (*File) Descriptor() ([]byte, []int) {
 func (x *File) GetLocalId() int64 {
 	if x != nil {
 		return x.LocalId
+	}
+	return 0
+}
+
+func (x *File) GetModuleId() int64 {
+	if x != nil && x.ModuleId != nil {
+		return *x.ModuleId
 	}
 	return 0
 }
@@ -524,25 +540,29 @@ var File_proto_index_proto protoreflect.FileDescriptor
 const file_proto_index_proto_rawDesc = "" +
 	"\n" +
 	"\x11proto/index.proto\x12\n" +
-	"askl.index\"^\n" +
-	"\vIndexUpload\x12!\n" +
-	"\fproject_name\x18\x01 \x01(\tR\vprojectName\x12,\n" +
-	"\amodules\x18\x02 \x03(\v2\x12.askl.index.ModuleR\amodules\"\x9a\x01\n" +
+	"askl.index\"\x9f\x01\n" +
+	"\aProject\x12!\n" +
+	"\fproject_name\x18\x01 \x01(\tR\vprojectName\x12\x1b\n" +
+	"\troot_path\x18\x02 \x01(\tR\brootPath\x12,\n" +
+	"\amodules\x18\x03 \x03(\v2\x12.askl.index.ModuleR\amodules\x12&\n" +
+	"\x05files\x18\x04 \x03(\v2\x10.askl.index.FileR\x05files\"r\n" +
 	"\x06Module\x12\x19\n" +
 	"\blocal_id\x18\x01 \x01(\x03R\alocalId\x12\x1f\n" +
 	"\vmodule_name\x18\x02 \x01(\tR\n" +
-	"moduleName\x12&\n" +
-	"\x05files\x18\x03 \x03(\v2\x10.askl.index.FileR\x05files\x12,\n" +
-	"\asymbols\x18\x04 \x03(\v2\x12.askl.index.SymbolR\asymbols\"\x89\x02\n" +
+	"moduleName\x12,\n" +
+	"\asymbols\x18\x03 \x03(\v2\x12.askl.index.SymbolR\asymbols\"\xb9\x02\n" +
 	"\x04File\x12\x19\n" +
-	"\blocal_id\x18\x01 \x01(\x03R\alocalId\x12\x1f\n" +
-	"\vmodule_path\x18\x02 \x01(\tR\n" +
+	"\blocal_id\x18\x01 \x01(\x03R\alocalId\x12 \n" +
+	"\tmodule_id\x18\x02 \x01(\x03H\x00R\bmoduleId\x88\x01\x01\x12\x1f\n" +
+	"\vmodule_path\x18\x03 \x01(\tR\n" +
 	"modulePath\x12'\n" +
-	"\x0ffilesystem_path\x18\x03 \x01(\tR\x0efilesystemPath\x12\x1a\n" +
-	"\bfiletype\x18\x04 \x01(\tR\bfiletype\x12\x18\n" +
-	"\acontent\x18\x05 \x01(\fR\acontent\x12;\n" +
-	"\fdeclarations\x18\x06 \x03(\v2\x17.askl.index.DeclarationR\fdeclarations\x12)\n" +
-	"\x04refs\x18\a \x03(\v2\x15.askl.index.SymbolRefR\x04refs\"f\n" +
+	"\x0ffilesystem_path\x18\x04 \x01(\tR\x0efilesystemPath\x12\x1a\n" +
+	"\bfiletype\x18\x05 \x01(\tR\bfiletype\x12\x18\n" +
+	"\acontent\x18\x06 \x01(\fR\acontent\x12;\n" +
+	"\fdeclarations\x18\a \x03(\v2\x17.askl.index.DeclarationR\fdeclarations\x12)\n" +
+	"\x04refs\x18\b \x03(\v2\x15.askl.index.SymbolRefR\x04refsB\f\n" +
+	"\n" +
+	"_module_id\"f\n" +
 	"\x06Symbol\x12\x19\n" +
 	"\blocal_id\x18\x01 \x01(\x03R\alocalId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12-\n" +
@@ -587,7 +607,7 @@ var file_proto_index_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_proto_index_proto_goTypes = []any{
 	(SymbolScope)(0),    // 0: askl.index.SymbolScope
 	(SymbolType)(0),     // 1: askl.index.SymbolType
-	(*IndexUpload)(nil), // 2: askl.index.IndexUpload
+	(*Project)(nil),     // 2: askl.index.Project
 	(*Module)(nil),      // 3: askl.index.Module
 	(*File)(nil),        // 4: askl.index.File
 	(*Symbol)(nil),      // 5: askl.index.Symbol
@@ -595,8 +615,8 @@ var file_proto_index_proto_goTypes = []any{
 	(*SymbolRef)(nil),   // 7: askl.index.SymbolRef
 }
 var file_proto_index_proto_depIdxs = []int32{
-	3, // 0: askl.index.IndexUpload.modules:type_name -> askl.index.Module
-	4, // 1: askl.index.Module.files:type_name -> askl.index.File
+	3, // 0: askl.index.Project.modules:type_name -> askl.index.Module
+	4, // 1: askl.index.Project.files:type_name -> askl.index.File
 	5, // 2: askl.index.Module.symbols:type_name -> askl.index.Symbol
 	6, // 3: askl.index.File.declarations:type_name -> askl.index.Declaration
 	7, // 4: askl.index.File.refs:type_name -> askl.index.SymbolRef
@@ -614,6 +634,7 @@ func file_proto_index_proto_init() {
 	if File_proto_index_proto != nil {
 		return
 	}
+	file_proto_index_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
