@@ -189,7 +189,7 @@ func main() {
 		Action: func(context.Context, *cli.Command) error {
 			err := parseModule(flags, ModuleRoot)
 			if err != nil {
-				log.Fatalf("Could not get the module path: %v", err)
+				log.Fatalf("Indexing failed: %v", err)
 			}
 			return nil
 		},

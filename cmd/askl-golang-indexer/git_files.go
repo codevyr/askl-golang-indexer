@@ -123,6 +123,14 @@ func addGitTrackedFiles(idx index.Index, repoPath string) error {
 
 	for _, relPath := range relativePaths {
 		absPath := filepath.Join(repoInfo.root, filepath.FromSlash(relPath))
+		info, err := os.Stat(absPath)
+		if err != nil {
+			return fmt.Errorf("tracked file missing on disk: %s: %w", absPath, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+
 		contents, err := os.ReadFile(absPath)
 		if err != nil {
 			return fmt.Errorf("read tracked file %s: %w", absPath, err)
