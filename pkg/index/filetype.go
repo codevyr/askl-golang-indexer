@@ -9,7 +9,7 @@ import (
 var extensionFiletypes = map[string]string{
 	".bash":  "text/x-shellscript",
 	".css":   "text/css",
-	".go":    "text/x-go",
+	".go":    GoFileType,
 	".html":  "text/html",
 	".js":    "text/javascript",
 	".json":  "application/json",

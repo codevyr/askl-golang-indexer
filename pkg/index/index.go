@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	GoFileType = "go"
+	GoFileType = "text/x-go"
 )
 
 type Config struct {
