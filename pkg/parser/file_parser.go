@@ -22,8 +22,8 @@ type FileParser struct {
 
 var _ Parsable = &FileParser{}
 
-func NewFileParser(parser *ParsingStage, pkg *packages.Package, filepath string, ast *ast.File, index index.Index) (*FileParser, error) {
-	moduleId, err := index.AddModule(pkg.PkgPath)
+func NewFileParser(parser *ParsingStage, pkg *packages.Package, filepath string, ast *ast.File, idx index.Index) (*FileParser, error) {
+	moduleId, err := idx.AddModule(pkg.PkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module: %w", err)
 	}
@@ -33,7 +33,7 @@ func NewFileParser(parser *ParsingStage, pkg *packages.Package, filepath string,
 		return nil, fmt.Errorf("failed to read file contents: %w", err)
 	}
 
-	fileId, err := index.AddFile(moduleId, pkg.Dir, filepath, contents)
+	fileId, err := idx.AddFile(&moduleId, pkg.Dir, filepath, index.GoFileType, contents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file: %w", err)
 	}
@@ -42,7 +42,7 @@ func NewFileParser(parser *ParsingStage, pkg *packages.Package, filepath string,
 		filepath: filepath,
 		ast:      ast,
 		pkg:      pkg,
-		index:    index,
+		index:    idx,
 		fileId:   fileId,
 		moduleId: moduleId,
 	}, nil

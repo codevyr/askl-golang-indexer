@@ -33,8 +33,8 @@ func getFileContents(filepath string) ([]byte, error) {
 	return contents, nil
 }
 
-func NewAssignmentParser(parser *ParsingStage, pkg *packages.Package, filepath string, ast *ast.File, index index.Index) (*AssignmentParser, error) {
-	moduleId, err := index.AddModule(pkg.PkgPath)
+func NewAssignmentParser(parser *ParsingStage, pkg *packages.Package, filepath string, ast *ast.File, idx index.Index) (*AssignmentParser, error) {
+	moduleId, err := idx.AddModule(pkg.PkgPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module: %w", err)
 	}
@@ -44,7 +44,7 @@ func NewAssignmentParser(parser *ParsingStage, pkg *packages.Package, filepath s
 		return nil, fmt.Errorf("failed to read file contents: %w", err)
 	}
 
-	fileId, err := index.AddFile(moduleId, pkg.Dir, filepath, contents)
+	fileId, err := idx.AddFile(&moduleId, pkg.Dir, filepath, index.GoFileType, contents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file: %w", err)
 	}
@@ -53,7 +53,7 @@ func NewAssignmentParser(parser *ParsingStage, pkg *packages.Package, filepath s
 		filepath: filepath,
 		ast:      ast,
 		pkg:      pkg,
-		index:    index,
+		index:    idx,
 		fileId:   fileId,
 		moduleId: moduleId,
 	}, nil

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"path/filepath"
 
 	"github.com/urfave/cli/v3"
 	"golang.org/x/mod/modfile"
@@ -57,8 +58,14 @@ const (
 )
 
 func parseModule(flags Flags, packageType ModuleType) error {
+	rootPath, err := filepath.Abs(flags.packagePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve package path: %w", err)
+	}
+
 	index, err := index.NewProtoIndex(
 		index.WithProject(flags.projectName),
+		index.WithRootPath(rootPath),
 	)
 	if err != nil {
 		return err
@@ -86,6 +93,12 @@ func parseModule(flags Flags, packageType ModuleType) error {
 	err = parser.AddPackages()
 	if err != nil {
 		return err
+	}
+
+	if flags.includeGitFiles {
+		if err := addGitTrackedFiles(index, flags.packagePath); err != nil {
+			return err
+		}
 	}
 
 	log.Println("Parsing files done")
@@ -120,6 +133,7 @@ type Flags struct {
 	projectName     string
 	continueOnError bool
 	parseTypes      bool
+	includeGitFiles bool
 }
 
 func main() {
@@ -165,11 +179,17 @@ func main() {
 				Usage:       "Parse type information",
 				Destination: &flags.parseTypes,
 			},
+			&cli.BoolFlag{
+				Name:        "include-git-files",
+				Value:       false,
+				Usage:       "Include all git-tracked files at HEAD in the project files list",
+				Destination: &flags.includeGitFiles,
+			},
 		},
 		Action: func(context.Context, *cli.Command) error {
 			err := parseModule(flags, ModuleRoot)
 			if err != nil {
-				log.Fatalf("Could not get the module path: %v", err)
+				log.Fatalf("Indexing failed: %v", err)
 			}
 			return nil
 		},
