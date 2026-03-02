@@ -5,3 +5,6 @@
 *.prof
 *.log
 *.test
+index*.pb
+.gocache
+bin/
