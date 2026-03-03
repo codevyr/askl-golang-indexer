@@ -54,6 +54,8 @@ jobs:
     needs:
       - test
       - lint
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository }}
     steps:
@@ -82,6 +84,7 @@ jobs:
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -112,16 +115,14 @@ jobs:
       - name: Run Trivy scan
         uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          image-ref: ${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image_digest }}
           format: table
           exit-code: "1"
           ignore-unfixed: true
           severity: CRITICAL,HIGH
           scan-type: image
-          scan-ref: .
           vuln-type: os,library
           cache-dir: ${{ github.workspace }}/.cache/trivy
-          list-all-pkgs: false
           version: v0.56.1
           cache: true
 
