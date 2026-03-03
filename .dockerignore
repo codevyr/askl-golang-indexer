@@ -1,0 +1,8 @@
+.git
+bin/
+*.db
+*.log
+*.out
+*.prof
+*.pb
+index*.db
