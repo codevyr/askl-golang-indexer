@@ -28,7 +28,9 @@ while [[ $# -gt 0 ]]; do
       break
       ;;
     -*)
-      break
+      echo "error: unrecognized option: $1" >&2
+      usage
+      exit 1
       ;;
     *)
       break
@@ -43,6 +45,11 @@ if [[ -z "$src_dir" || -z "$out_file" ]]; then
   exit 1
 fi
 shift 2
+
+if [[ ! -d "$src_dir" ]]; then
+  echo "error: source directory does not exist or is not a directory: $src_dir" >&2
+  exit 1
+fi
 
 if [[ -d "$out_file" ]]; then
   echo "error: output index must be a file path, not a directory: $out_file" >&2

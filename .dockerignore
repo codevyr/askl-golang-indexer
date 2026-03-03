@@ -3,7 +3,6 @@ bin/
 *.db
 *.log
 *.out
-*.pb
 *.prof
+*.pb
 index*.db
-index*.pb
