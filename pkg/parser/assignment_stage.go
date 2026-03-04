@@ -2,9 +2,9 @@ package parser
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
+	"github.com/planetA/askl-golang-indexer/pkg/logging"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -28,11 +28,11 @@ func NewAssignmentStage(parser *Parser, pkg *packages.Package, index index.Index
 
 func (p *AssignmentStage) Parse(parser *ParsingStage) error {
 	if len(p.pkg.CompiledGoFiles) != len(p.pkg.Syntax) {
-		log.Println(p.pkg.CompiledGoFiles, p.pkg.Syntax)
+		logging.Errorf("%v %v", p.pkg.CompiledGoFiles, p.pkg.Syntax)
 		return fmt.Errorf("not all files in a package have been parsed")
 	}
 
-	log.Printf("Parsing package %s (%s) with %d files", p.pkg.Name, p.pkg.PkgPath, len(p.pkg.CompiledGoFiles))
+	logging.Infof("Parsing package %s (%s) with %d files", p.pkg.Name, p.pkg.PkgPath, len(p.pkg.CompiledGoFiles))
 	for i, file := range p.pkg.CompiledGoFiles {
 		fileParser, err := NewAssignmentParser(parser, p.pkg, file, p.pkg.Syntax[i], p.index)
 		if err != nil {

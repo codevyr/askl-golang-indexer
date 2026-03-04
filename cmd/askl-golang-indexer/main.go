@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"golang.org/x/mod/modfile"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
+	"github.com/planetA/askl-golang-indexer/pkg/logging"
 	"github.com/planetA/askl-golang-indexer/pkg/parser"
 )
 
@@ -77,7 +77,7 @@ func parseModule(flags Flags, packageType ModuleType) error {
 		return err
 	}
 
-	log.Printf("Module path: %v Package path %v", module.Module.Mod.Path, flags.packagePath)
+	logging.Infof("Module path: %v Package path %v", module.Module.Mod.Path, flags.packagePath)
 
 	parser := parser.NewParser(flags.packagePath, index,
 		parser.WithContinueOnError(flags.continueOnError),
@@ -101,7 +101,7 @@ func parseModule(flags Flags, packageType ModuleType) error {
 		}
 	}
 
-	log.Println("Parsing files done")
+	logging.Info("Parsing files done")
 
 	err = index.ResolveReferences()
 	if err != nil {
@@ -134,10 +134,16 @@ type Flags struct {
 	continueOnError bool
 	parseTypes      bool
 	includeGitFiles bool
+	logLevel        string
 }
 
 func main() {
 	var flags Flags
+
+	if err := logging.Configure("error"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	cmd := &cli.Command{
 		Name:  "askl-golang-indexer",
@@ -185,18 +191,27 @@ func main() {
 				Usage:       "Include all git-tracked files at HEAD in the project files list",
 				Destination: &flags.includeGitFiles,
 			},
+			&cli.StringFlag{
+				Name:        "log-level",
+				Value:       "error",
+				Usage:       "Logging level (`debug`, `info`, `warn`, `error`)",
+				Destination: &flags.logLevel,
+			},
 		},
 		Action: func(context.Context, *cli.Command) error {
+			if err := logging.Configure(flags.logLevel); err != nil {
+				return err
+			}
 			err := parseModule(flags, ModuleRoot)
 			if err != nil {
-				log.Fatalf("Indexing failed: %v", err)
+				logging.Fatalf("Indexing failed: %v", err)
 			}
 			return nil
 		},
 	}
 
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		log.Fatal(err)
+		logging.Fatal(err)
 	}
 
 }

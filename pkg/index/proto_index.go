@@ -4,7 +4,6 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"go/token"
-	"log"
 	"math"
 	"strings"
 	"sync"
@@ -12,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/planetA/askl-golang-indexer/pkg/indexpb"
+	"github.com/planetA/askl-golang-indexer/pkg/logging"
 )
 
 type symbolKey struct {
@@ -224,7 +224,7 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 	if baseDir != "" {
 		relPath, ok := strings.CutPrefix(path, baseDir)
 		if !ok {
-			log.Printf("file %v is not in the directory %v", path, baseDir)
+			logging.Warnf("file %v is not in the directory %v", path, baseDir)
 		} else {
 			modulePath = relPath
 		}
@@ -486,15 +486,15 @@ func (i *ProtoIndex) ResolveReferences() error {
 
 		file := i.fileByID[int64(ref.fromFile)]
 		if file == nil {
-			log.Printf("reference from file not found: %d", ref.fromFile)
+			logging.Warnf("reference from file not found: %d", ref.fromFile)
 			continue
 		}
 		if ref.start.Offset > math.MaxInt32 || ref.start.Offset < 0 {
-			log.Printf("reference start offset out of range: %d", ref.start.Offset)
+			logging.Warnf("reference start offset out of range: %d", ref.start.Offset)
 			continue
 		}
 		if ref.end.Offset > math.MaxInt32 || ref.end.Offset < 0 {
-			log.Printf("reference end offset out of range: %d", ref.end.Offset)
+			logging.Warnf("reference end offset out of range: %d", ref.end.Offset)
 			continue
 		}
 

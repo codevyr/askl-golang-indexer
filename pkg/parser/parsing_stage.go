@@ -3,8 +3,9 @@ package parser
 import (
 	"errors"
 	"fmt"
-	"log"
 	"sync"
+
+	"github.com/planetA/askl-golang-indexer/pkg/logging"
 )
 
 type ParsingStage struct {
@@ -44,7 +45,7 @@ func (s *ParsingStage) loop() {
 	for item := range s.channel {
 		err := s.doParse(item)
 		if err != nil {
-			log.Fatalf("failed to parse package: %v", err)
+			logging.Fatalf("failed to parse package: %v", err)
 		}
 	}
 }
@@ -65,7 +66,7 @@ func (s *ParsingStage) doParse(item Parsable) error {
 		err := item.Parse(s)
 		if err != nil {
 			// Send the error to the channel
-			log.Printf("Error parsing item: %v", err)
+			logging.Errorf("Error parsing item: %v", err)
 			s.err <- fmt.Errorf("failed to parse: %w", err)
 		} else {
 			s.err <- nil
