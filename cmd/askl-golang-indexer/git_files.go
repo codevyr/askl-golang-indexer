@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
+	"github.com/planetA/askl-golang-indexer/pkg/logging"
 )
 
 type gitRepoInfo struct {
@@ -51,7 +51,7 @@ func warnIfDirty(worktree *git.Worktree) error {
 		return fmt.Errorf("git status: %w", err)
 	}
 	if !status.IsClean() {
-		log.Printf("warning: git worktree has uncommitted changes")
+		logging.Warn("git worktree has uncommitted changes")
 	}
 	return nil
 }

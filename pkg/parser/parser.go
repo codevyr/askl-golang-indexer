@@ -5,9 +5,9 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
-	"log"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
+	"github.com/planetA/askl-golang-indexer/pkg/logging"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -83,7 +83,7 @@ func (p *Parser) Load() error {
 func (p *Parser) AddPackages() error {
 
 	for _, stage := range p.stages {
-		log.Printf("Running stage: %s", stage.StageName)
+		logging.Infof("Running stage: %s", stage.StageName)
 		p.builtin.Apply(func(pkg *packages.Package) error {
 			item := stage.StageConstructor(p, pkg, p.index, p.continueOnError)
 			err := stage.Parse(item)
@@ -95,7 +95,7 @@ func (p *Parser) AddPackages() error {
 		})
 
 		for _, pkg := range p.pkgs {
-			log.Printf("Parsing package %s with stage %s", pkg.PkgPath, stage.StageName)
+			logging.Infof("Parsing package %s with stage %s", pkg.PkgPath, stage.StageName)
 			item := stage.StageConstructor(p, pkg, p.index, p.continueOnError)
 			err := stage.Parse(item)
 			if err != nil {
@@ -106,7 +106,7 @@ func (p *Parser) AddPackages() error {
 		if err != nil {
 			return fmt.Errorf("failed to wait for stage %s: %w", stage.StageName, err)
 		}
-		log.Printf("Finished stage: %s", stage.StageName)
+		logging.Infof("Finished stage: %s", stage.StageName)
 	}
 
 	return nil

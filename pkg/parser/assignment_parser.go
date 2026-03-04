@@ -6,10 +6,10 @@ import (
 	"go/token"
 	"go/types"
 	"iter"
-	"log"
 	"os"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
+	"github.com/planetA/askl-golang-indexer/pkg/logging"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -172,7 +172,7 @@ func (f *AssignmentParser) extractReturnType(returnExpr []ast.Expr, position, to
 		default:
 			// Print position of the nested right-hand side expression
 			pos := f.pkg.Fset.Position(nestedRhs.Pos())
-			log.Printf("Nested right-hand side expression at position %s: %T", pos, nestedRhs)
+			logging.Errorf("Nested right-hand side expression at position %s: %T", pos, nestedRhs)
 			return nil, fmt.Errorf("unhandled nested right-hand side expression: %T", nestedRhs)
 		}
 	}
@@ -209,7 +209,7 @@ func unwrapType(t types.Type) types.Type {
 func (f *AssignmentParser) connectInterfaceToImplementation(lhs *types.Interface, lhsIdx int, lhsLen int, allRhs []ast.Expr) error {
 	rhsType, err := f.extractReturnType(allRhs, lhsIdx, lhsLen)
 	if err != nil {
-		log.Printf("Error extracting return type: %v", err)
+		logging.Errorf("Error extracting return type: %v", err)
 		return fmt.Errorf("failed to extract return type: %w", err)
 	}
 
@@ -227,24 +227,24 @@ func (f *AssignmentParser) connectInterfaceToImplementation(lhs *types.Interface
 	case *types.Interface:
 		// If the right-hand side is an interface type, we can try to connect it to the left-hand side interface
 		if lhs == nil {
-			log.Printf("Left-hand side interface is nil, cannot connect to right-hand side interface")
+			logging.Errorf("Left-hand side interface is nil, cannot connect to right-hand side interface")
 			return fmt.Errorf("left-hand side interface is nil, cannot connect to right-hand side interface")
 		}
 		// Create references between the methods of the left-hand side interface and the right-hand side interface
 		return f.createInterfaceReferences(lhs.Methods(), rhsType.Methods())
 	default:
-		log.Printf("Right-hand side type is not a named type: %T", rhsType)
+		logging.Errorf("Right-hand side type is not a named type: %T", rhsType)
 		return fmt.Errorf("right-hand side type is not a named type: %T", rhsType)
 	}
 }
 
 func (f *AssignmentParser) assignStmtParser(parser *ParsingStage, as *ast.AssignStmt) (bool, error) {
 	if len(as.Lhs) == 0 {
-		log.Println("Skipping assign statement with no left-hand side")
+		logging.Debug("Skipping assign statement with no left-hand side")
 		return false, nil
 	}
 	if len(as.Rhs) == 0 {
-		log.Println("Skipping assign statement with no right-hand side")
+		logging.Debug("Skipping assign statement with no right-hand side")
 		return false, nil
 	}
 
@@ -263,7 +263,7 @@ func (f *AssignmentParser) assignStmtParser(parser *ParsingStage, as *ast.Assign
 		if err != nil {
 			// Print the location of the assignment
 			pos := f.pkg.Fset.Position(lhs.Pos())
-			log.Printf("Error connecting interface %s at position %s: %v", varType, pos, err)
+			logging.Errorf("Error connecting interface %s at position %s: %v", varType, pos, err)
 			return false, fmt.Errorf("failed to connect interface %s to implementation: %s", varType, err)
 		}
 	}
@@ -285,7 +285,7 @@ func (f *AssignmentParser) callExprParser(parser *ParsingStage, call *ast.CallEx
 	// Get the type of the function being called
 	funType := f.pkg.TypesInfo.TypeOf(fun)
 	if funType == nil {
-		log.Println("Skipping call expression with no type information for function")
+		logging.Debug("Skipping call expression with no type information for function")
 		return false, nil
 	}
 
@@ -325,7 +325,7 @@ func (f *AssignmentParser) callExprParser(parser *ParsingStage, call *ast.CallEx
 		if err != nil {
 			// Print the location of the call expression
 			pos := f.pkg.Fset.Position(call.Pos())
-			log.Printf("Error connecting interface %s at position %s: %v", varType, pos, err)
+			logging.Errorf("Error connecting interface %s at position %s: %v", varType, pos, err)
 			return false, fmt.Errorf("failed to connect interface %s to implementation: %s", varType, err)
 		}
 	}
@@ -360,7 +360,7 @@ func (f *AssignmentParser) valueSpecParser(parser *ParsingStage, vs *ast.ValueSp
 		if err != nil {
 			// Print the location of the assignment
 			pos := f.pkg.Fset.Position(name.Pos())
-			log.Printf("Error connecting interface %s at position %s: %v", varType, pos, err)
+			logging.Errorf("Error connecting interface %s at position %s: %v", varType, pos, err)
 			return false, fmt.Errorf("failed to connect interface %s to implementation: %s", varType, err)
 		}
 	}
@@ -375,7 +375,7 @@ func (f *AssignmentParser) returnStmtParser(parser *ParsingStage, fnType *ast.Fu
 
 	lhs := fnType.Results
 	if lhs == nil {
-		log.Println("Function has no return values")
+		logging.Debug("Function has no return values")
 		return false, nil
 	}
 
@@ -418,7 +418,7 @@ func (f *AssignmentParser) returnStmtParser(parser *ParsingStage, fnType *ast.Fu
 				err := f.connectInterfaceToImplementation(ifaceType, idx, total, rs.Results)
 				if err != nil {
 					pos := f.pkg.Fset.Position(lhs.Pos())
-					log.Printf("Error connecting interface %s at position %s: %v", ifaceType, pos, err)
+					logging.Errorf("Error connecting interface %s at position %s: %v", ifaceType, pos, err)
 					return false, fmt.Errorf("failed to connect interface %s to implementation: %s", ifaceType, err)
 				}
 			}
@@ -440,7 +440,7 @@ func (f *AssignmentParser) functionBodyParser(parser *ParsingStage, fnType *ast.
 	ok := true
 	ast.Inspect(fnBody, func(n ast.Node) bool {
 		if err != nil {
-			log.Printf("Error encountered during parsing, stopping traversal: %v", err)
+			logging.Errorf("Error encountered during parsing, stopping traversal: %v", err)
 			return false // stop traversing on error
 		}
 
@@ -448,7 +448,7 @@ func (f *AssignmentParser) functionBodyParser(parser *ParsingStage, fnType *ast.
 		case *ast.FuncLit:
 			ok, err = f.functionBodyParser(parser, n.Type, n.Body) // Recursively parse nested function bodies
 			if err != nil {
-				log.Printf("Error parsing nested function body: %v", err)
+				logging.Errorf("Error parsing nested function body: %v", err)
 				return false // stop traversing on error
 			}
 			return false // stop traversing, we are only interested in the current function body
@@ -456,7 +456,7 @@ func (f *AssignmentParser) functionBodyParser(parser *ParsingStage, fnType *ast.
 			var ok bool
 			ok, err = f.returnStmtParser(parser, fnType, n)
 			if err != nil {
-				log.Printf("Error parsing assign statement: %v", err)
+				logging.Errorf("Error parsing assign statement: %v", err)
 				return false // stop traversing on error
 			}
 			return ok // continue traversing
@@ -466,7 +466,7 @@ func (f *AssignmentParser) functionBodyParser(parser *ParsingStage, fnType *ast.
 	})
 
 	if err != nil {
-		log.Printf("Error parsing function body: %v", err)
+		logging.Errorf("Error parsing function body: %v", err)
 		// If we encountered an error, we should not continue parsing
 		return false, fmt.Errorf("failed to parse function body: %w", err)
 	}
@@ -480,7 +480,7 @@ func (f *AssignmentParser) Parse(parser *ParsingStage) (err error) {
 
 	ast.Inspect(f.ast, func(n ast.Node) bool {
 		if err != nil {
-			log.Printf("Error encountered during parsing, stopping traversal (%v): %v", errorExit, err)
+			logging.Errorf("Error encountered during parsing, stopping traversal (%v): %v", errorExit, err)
 			return errorExit
 		}
 
@@ -489,28 +489,28 @@ func (f *AssignmentParser) Parse(parser *ParsingStage) (err error) {
 		case *ast.AssignStmt:
 			ok, err = f.assignStmtParser(parser, n)
 			if err != nil {
-				log.Printf("Error parsing assign statement: %v", err)
+				logging.Errorf("Error parsing assign statement: %v", err)
 				return errorExit
 			}
 			return ok
 		case *ast.ValueSpec:
 			ok, err = f.valueSpecParser(parser, n)
 			if err != nil {
-				log.Printf("Error parsing value spec: %v", err)
+				logging.Errorf("Error parsing value spec: %v", err)
 				return errorExit
 			}
 			return ok
 		case *ast.CallExpr:
 			ok, err = f.callExprParser(parser, n)
 			if err != nil {
-				log.Printf("Error parsing call expression: %v", err)
+				logging.Errorf("Error parsing call expression: %v", err)
 				return errorExit
 			}
 			return ok
 		case *ast.FuncDecl:
 			ok, err = f.functionBodyParser(parser, n.Type, n.Body)
 			if err != nil {
-				log.Printf("Error parsing function body: %v", err)
+				logging.Errorf("Error parsing function body: %v", err)
 				return errorExit
 			}
 			return ok
@@ -520,7 +520,7 @@ func (f *AssignmentParser) Parse(parser *ParsingStage) (err error) {
 	})
 
 	if errorExit {
-		log.Printf("Finished parsing file %s with error: %v", f.filepath, err)
+		logging.Warnf("Finished parsing file %s with error: %v", f.filepath, err)
 		return nil
 	}
 

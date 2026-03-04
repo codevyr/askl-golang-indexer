@@ -5,9 +5,9 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
-	"log"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
+	"github.com/planetA/askl-golang-indexer/pkg/logging"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -52,7 +52,7 @@ func (f *FileParser) addInterfaceMethods(interfaceType *ast.InterfaceType) (bool
 	for _, method := range interfaceType.Methods.List {
 		if len(method.Names) == 0 {
 			pos := f.pkg.Fset.Position(method.Pos())
-			log.Printf("Skipping interface method with no name at %s", pos)
+			logging.Warnf("Skipping interface method with no name at %s", pos)
 			continue
 		}
 		methodName := method.Names[0]
@@ -102,52 +102,52 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 			case *ast.SelectorExpr:
 				ident = fun.Sel
 			case *ast.FuncLit:
-				log.Println("Unimplemented:", start, end)
+				logging.Debugf("Unimplemented: %s %s", start, end)
 				return true
 			case *ast.ParenExpr:
-				log.Println("Unimplemented")
+				logging.Debug("Unimplemented")
 				return true
 			case *ast.CallExpr:
-				log.Println("Unimplemented")
+				logging.Debug("Unimplemented")
 				return true
 			case *ast.TypeAssertExpr:
-				log.Println("Unimplemented")
+				logging.Debug("Unimplemented")
 				return true
 			case *ast.IndexExpr:
-				log.Println("Unimplemented")
+				logging.Debug("Unimplemented")
 				return true
 			case *ast.IndexListExpr:
-				log.Println("Unimplemented")
+				logging.Debug("Unimplemented")
 				return true
 			case *ast.ChanType:
-				log.Println("Unimplemented")
+				logging.Debug("Unimplemented")
 				return true
 			case *ast.InterfaceType:
 				recurse, err = f.addInterfaceMethods(fun)
 				if err != nil {
-					log.Printf("Failed to add interface methods: %v", err)
+					logging.Errorf("Failed to add interface methods: %v", err)
 					return false
 				}
 				return recurse
 			case *ast.MapType:
-				log.Println("Unimplemented")
+				logging.Debug("Unimplemented")
 				return true
 			case *ast.ArrayType:
 				// We do not care about array initialization
 				return true
 			default:
-				log.Fatalf("Unknown call expression type %T %s %s", fun, start, end)
+				logging.Fatalf("Unknown call expression type %T %s %s", fun, start, end)
 			}
 			var pos token.Position
 			obj := f.pkg.TypesInfo.ObjectOf(ident)
 			if obj == nil {
-				log.Printf("Unimplemented: %s call= %+v obj= %+v %s %s %T", ident, call, obj, start, end, callExpr.Fun)
+				logging.Debugf("Unimplemented: %s call= %+v obj= %+v %s %s %T", ident, call, obj, start, end, callExpr.Fun)
 				return true
 			}
 			if !obj.Pos().IsValid() {
 				typeValue, ok := f.pkg.TypesInfo.Types[callExpr.Fun]
 				if !ok {
-					log.Fatalf("Failed to find type for %s in %s", ident.Name, f.filepath)
+					logging.Fatalf("Failed to find type for %s in %s", ident.Name, f.filepath)
 				}
 				if typeValue.IsType() {
 					// Type conversions are not references.
@@ -164,16 +164,16 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 				case *types.Func:
 					call = obj.Origin().FullName()
 				case *types.TypeName:
-					log.Println("Unimplemented:", obj.String(), start, end)
+					logging.Debugf("Unimplemented: %s %s %s", obj.String(), start, end)
 					return true
 				case *types.Var:
-					log.Println("Unimplemented:", obj.String(), start, end)
+					logging.Debugf("Unimplemented: %s %s %s", obj.String(), start, end)
 					return true
 				case *types.Builtin:
-					log.Println("Unimplemented:", obj.String(), start, end)
+					logging.Debugf("Unimplemented: %s %s %s", obj.String(), start, end)
 					return true
 				default:
-					log.Panicf("Unimplemented %+T", obj)
+					logging.Panicf("Unimplemented %+T", obj)
 				}
 				pos = f.pkg.Fset.Position(obj.Pos())
 			}
@@ -224,7 +224,7 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 
 func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec) bool {
 	if ts.Name == nil {
-		log.Println("Skipping type spec with no name")
+		logging.Warn("Skipping type spec with no name")
 		return false
 	}
 	name := ts.Name.Name
@@ -232,19 +232,19 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec) bool
 	switch ts := ts.Type.(type) {
 	case *ast.InterfaceType:
 		if ts.Methods == nil {
-			log.Printf("Skipping empty interface %s", name)
+			logging.Debugf("Skipping empty interface %s", name)
 			return false
 		}
 
 		for _, method := range ts.Methods.List {
 			if len(method.Names) == 0 {
-				log.Printf("Skipping interface method with no name in %s", name)
+				logging.Warnf("Skipping interface method with no name in %s", name)
 				continue
 			}
 			methodName := method.Names[0]
 			obj, ok := f.pkg.TypesInfo.Defs[methodName]
 			if !ok {
-				log.Panicf("Expected to find definition %s", methodName)
+				logging.Panicf("Expected to find definition %s", methodName)
 			}
 			objFunc := obj.(*types.Func)
 			fullName := objFunc.FullName()
@@ -254,7 +254,7 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec) bool
 
 			_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeDeclaration, start, end)
 			if err != nil {
-				log.Fatalf("Failed to add symbol: %s", err)
+				logging.Fatalf("Failed to add symbol: %s", err)
 			}
 
 		}
@@ -276,22 +276,22 @@ func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 		switch n := n.(type) {
 		case *ast.FuncLit:
 			// Print the function literal
-			log.Printf("Found function literal at %s: %T %T", f.pkg.Fset.Position(n.Pos()), n, n.Type)
+			logging.Debugf("Found function literal at %s: %T %T", f.pkg.Fset.Position(n.Pos()), n, n.Type)
 			return true // continue traversing
 		case *ast.FuncType:
-			log.Printf("Found function type object at %s: %T", f.pkg.Fset.Position(n.Pos()), n)
+			logging.Debugf("Found function type object at %s: %T", f.pkg.Fset.Position(n.Pos()), n)
 			return true // continue traversing
 		case *ast.FuncDecl:
 			recurse, err = f.funcDeclParser(parser, n)
 			if err != nil {
-				log.Printf("Failed to parse function declaration %s: %v", n.Name.Name, err)
+				logging.Errorf("Failed to parse function declaration %s: %v", n.Name.Name, err)
 				return false // stop traversing
 			}
 			return recurse
 		case *ast.InterfaceType:
 			recurse, err = f.addInterfaceMethods(n)
 			if err != nil {
-				log.Printf("Failed to add interface methods: %v", err)
+				logging.Errorf("Failed to add interface methods: %v", err)
 				return false
 			}
 			return recurse
