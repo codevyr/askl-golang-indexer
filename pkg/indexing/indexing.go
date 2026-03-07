@@ -80,6 +80,7 @@ func ParseModules(modulePaths []string, rootPath string, opts Options) error {
 		pkgParser := parser.NewParserWithPaths(groupPaths, idx,
 			parser.WithContinueOnError(opts.ContinueOnError),
 			parser.WithParseTypes(opts.ParseTypes),
+			parser.WithRootPath(rootPath),
 		)
 
 		err = pkgParser.Load()
@@ -211,12 +212,12 @@ func getModulePath(packagePath string) (*modfile.File, error) {
 
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
-		return nil, fmt.Errorf("could not read go.mod file: %v", err)
+		return nil, fmt.Errorf("could not read go.mod file: %w", err)
 	}
 
 	modFile, err := modfile.Parse("go.mod", data, nil)
 	if err != nil {
-		return nil, fmt.Errorf("could not parse go.mod file: %v", err)
+		return nil, fmt.Errorf("could not parse go.mod file: %w", err)
 	}
 
 	return modFile, nil
@@ -234,7 +235,7 @@ func findGoModPath(packagePath string) (string, error) {
 
 		parent := filepath.Dir(curPath)
 		if parent == curPath {
-			return "", fmt.Errorf("could not find mod path neither in %v, nor in parent directories", packagePath)
+			return "", fmt.Errorf("could not find go.mod in %v or any parent directory", packagePath)
 		}
 		curPath = parent
 	}

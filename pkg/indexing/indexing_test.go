@@ -179,3 +179,81 @@ func filePathSet(project *indexpb.Project) map[string]struct{} {
 	}
 	return paths
 }
+
+// TestModulePathsAreUniqueAndRelativeToRoot verifies that when indexing multiple
+// packages across different modules, the ModulePath values are:
+// 1. Unique (no two files should have the same ModulePath)
+// 2. Relative to the project's rootPath (not relative to each package's directory)
+//
+// This test currently FAILS because baseDir is set to pkg.Dir instead of rootPath,
+// causing files like mod-one/cmd/tool/main.go and mod-two/cmd/app/main.go to both
+// have ModulePath="/main.go" instead of their full paths relative to the root.
+func TestModulePathsAreUniqueAndRelativeToRoot(t *testing.T) {
+	repoRoot := repoRoot(t)
+	fixtureRoot := filepath.Join(repoRoot, "pkg", "parser", "test", "src", "multi_module")
+
+	modOneCmd := mustAbs(t, filepath.Join(fixtureRoot, "mod-one", "cmd", "tool"))
+	modTwoCmd := mustAbs(t, filepath.Join(fixtureRoot, "mod-two", "cmd", "app"))
+
+	indexPath := filepath.Join(t.TempDir(), "index.pb")
+	opts := Options{
+		ProjectName: "test_project",
+		IndexPath:   indexPath,
+	}
+
+	rootPath := mustAbs(t, fixtureRoot)
+	err := ParseModules([]string{modOneCmd, modTwoCmd}, rootPath, opts)
+	if err != nil {
+		t.Fatalf("ParseModules failed: %v", err)
+	}
+
+	project := readIndexProject(t, indexPath)
+
+	// Verify that rootPath is set correctly on the project
+	if project.GetRootPath() != rootPath {
+		t.Errorf("expected RootPath=%q, got %q", rootPath, project.GetRootPath())
+	}
+
+	// Collect all ModulePath values and check for uniqueness
+	modulePathCounts := make(map[string][]string) // modulePath -> list of filesystemPaths with that modulePath
+	for _, file := range project.GetFiles() {
+		if file == nil {
+			continue
+		}
+		modulePath := file.GetModulePath()
+		fsPath := file.GetFilesystemPath()
+		modulePathCounts[modulePath] = append(modulePathCounts[modulePath], fsPath)
+	}
+
+	// Check that no ModulePath is shared by multiple files
+	for modulePath, fsPaths := range modulePathCounts {
+		if len(fsPaths) > 1 {
+			t.Errorf("ModulePath %q is not unique, shared by %d files: %v", modulePath, len(fsPaths), fsPaths)
+		}
+	}
+
+	// Verify that ModulePath values are relative to rootPath, not to each package's directory.
+	// For example, mod-one/cmd/tool/main.go should have ModulePath="/mod-one/cmd/tool/main.go"
+	// (relative to rootPath), not ModulePath="/main.go" (relative to pkg.Dir).
+	expectedModulePaths := map[string]string{
+		filepath.Join(modOneCmd, "main.go"): "/mod-one/cmd/tool/main.go",
+		filepath.Join(modTwoCmd, "main.go"): "/mod-two/cmd/app/main.go",
+	}
+
+	for _, file := range project.GetFiles() {
+		if file == nil {
+			continue
+		}
+		fsPath := file.GetFilesystemPath()
+		expectedModulePath, ok := expectedModulePaths[fsPath]
+		if !ok {
+			continue // skip files not in our expected set (e.g., builtin files)
+		}
+
+		actualModulePath := file.GetModulePath()
+		if actualModulePath != expectedModulePath {
+			t.Errorf("File %q has ModulePath=%q, expected %q (relative to rootPath)",
+				fsPath, actualModulePath, expectedModulePath)
+		}
+	}
+}

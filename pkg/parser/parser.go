@@ -20,6 +20,7 @@ type Parser struct {
 
 	packagePath  string
 	packagePaths []string
+	rootPath     string
 	index        index.Index
 
 	parseTypes      bool
@@ -37,6 +38,12 @@ func WithParseTypes(parseTypes bool) option {
 func WithContinueOnError(continueOnError bool) option {
 	return func(p *Parser) {
 		p.continueOnError = continueOnError
+	}
+}
+
+func WithRootPath(rootPath string) option {
+	return func(p *Parser) {
+		p.rootPath = rootPath
 	}
 }
 
@@ -84,10 +91,7 @@ func (p *Parser) Load() error {
 		return fmt.Errorf("no package paths provided")
 	}
 
-	patterns := append([]string{}, p.packagePaths...)
-	patterns = append(patterns, "builtin", "unsafe")
-
-	p.pkgs, err = packages.Load(cfg, patterns...)
+	p.pkgs, err = packages.Load(cfg, p.packagePaths...)
 	if err != nil {
 		return fmt.Errorf("failed to load a package: %w", err)
 	}

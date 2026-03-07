@@ -46,7 +46,7 @@ func (p *PackageParser) Parse(parser *ParsingStage) error {
 
 	logging.Infof("Parsing package %s (%s) with %d files", p.pkg.Name, p.pkg.PkgPath, len(p.pkg.CompiledGoFiles))
 	for i, file := range p.pkg.CompiledGoFiles {
-		fileParser, err := NewFileParser(parser, p.pkg, file, p.pkg.Syntax[i], p.index)
+		fileParser, err := NewFileParser(parser, p.pkg, p.parser.rootPath, file, p.pkg.Syntax[i], p.index)
 		if err != nil {
 			return err
 		}
