@@ -27,6 +27,9 @@ docker run --rm \
 Notes:
 - `--include-git-files` expects the source volume to include `.git`.
 - The output volume must be writable by the container user.
+- `--path` is repeatable and supports globs (for example `--path /workspace/cmd/*`).
+- Positional args can be used in addition to `--path`.
+- `--root` overrides the inferred project root stored in the index.
 
 ## Script
 

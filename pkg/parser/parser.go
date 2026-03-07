@@ -18,8 +18,9 @@ type Parser struct {
 
 	stages []*ParsingStage
 
-	packagePath string
-	index       index.Index
+	packagePath  string
+	packagePaths []string
+	index        index.Index
 
 	parseTypes      bool
 	continueOnError bool
@@ -40,10 +41,17 @@ func WithContinueOnError(continueOnError bool) option {
 }
 
 func NewParser(packagePath string, index index.Index, options ...option) *Parser {
+	return NewParserWithPaths([]string{packagePath}, index, options...)
+}
+
+func NewParserWithPaths(packagePaths []string, index index.Index, options ...option) *Parser {
 	p := &Parser{
-		packagePath: packagePath,
-		index:       index,
-		stages:      []*ParsingStage{},
+		index:        index,
+		stages:       []*ParsingStage{},
+		packagePaths: append([]string{}, packagePaths...),
+	}
+	if len(packagePaths) > 0 {
+		p.packagePath = packagePaths[0]
 	}
 
 	for _, opt := range options {
@@ -72,7 +80,14 @@ func (p *Parser) Load() error {
 		return fmt.Errorf("failed to load builtin packages: %w", err)
 	}
 
-	p.pkgs, err = packages.Load(cfg, p.packagePath, "builtin", "unsafe")
+	if len(p.packagePaths) == 0 {
+		return fmt.Errorf("no package paths provided")
+	}
+
+	patterns := append([]string{}, p.packagePaths...)
+	patterns = append(patterns, "builtin", "unsafe")
+
+	p.pkgs, err = packages.Load(cfg, patterns...)
 	if err != nil {
 		return fmt.Errorf("failed to load a package: %w", err)
 	}
@@ -81,6 +96,7 @@ func (p *Parser) Load() error {
 }
 
 func (p *Parser) AddPackages() error {
+	uniquePkgs := uniquePackages(p.pkgs)
 
 	for _, stage := range p.stages {
 		logging.Infof("Running stage: %s", stage.StageName)
@@ -94,7 +110,7 @@ func (p *Parser) AddPackages() error {
 			return nil
 		})
 
-		for _, pkg := range p.pkgs {
+		for _, pkg := range uniquePkgs {
 			logging.Infof("Parsing package %s with stage %s", pkg.PkgPath, stage.StageName)
 			item := stage.StageConstructor(p, pkg, p.index, p.continueOnError)
 			err := stage.Parse(item)
@@ -110,6 +126,29 @@ func (p *Parser) AddPackages() error {
 	}
 
 	return nil
+}
+
+func uniquePackages(pkgs []*packages.Package) []*packages.Package {
+	seen := make(map[string]struct{}, len(pkgs))
+	out := make([]*packages.Package, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg == nil {
+			continue
+		}
+		key := pkg.ID
+		if key == "" {
+			key = pkg.PkgPath
+		}
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, pkg)
+	}
+	return out
 }
 
 func (p *Parser) Close() {
