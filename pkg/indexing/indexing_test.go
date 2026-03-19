@@ -167,7 +167,7 @@ func readIndexProject(t *testing.T, indexPath string) *indexpb.Project {
 
 func filePathSet(project *indexpb.Project) map[string]struct{} {
 	paths := make(map[string]struct{})
-	for _, file := range project.GetFiles() {
+	for _, file := range project.GetObjects() {
 		if file == nil {
 			continue
 		}
@@ -216,7 +216,7 @@ func TestModulePathsAreUniqueAndRelativeToRoot(t *testing.T) {
 
 	// Collect all ModulePath values and check for uniqueness
 	modulePathCounts := make(map[string][]string) // modulePath -> list of filesystemPaths with that modulePath
-	for _, file := range project.GetFiles() {
+	for _, file := range project.GetObjects() {
 		if file == nil {
 			continue
 		}
@@ -240,7 +240,7 @@ func TestModulePathsAreUniqueAndRelativeToRoot(t *testing.T) {
 		filepath.Join(modTwoCmd, "main.go"): "/mod-two/cmd/app/main.go",
 	}
 
-	for _, file := range project.GetFiles() {
+	for _, file := range project.GetObjects() {
 		if file == nil {
 			continue
 		}

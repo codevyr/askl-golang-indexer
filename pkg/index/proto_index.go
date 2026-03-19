@@ -70,7 +70,7 @@ type ProtoIndex struct {
 	modulesByName map[string]int64
 	moduleByID    map[int64]*indexpb.Module
 
-	fileByID      map[int64]*indexpb.File
+	fileByID      map[int64]*indexpb.Object
 	filePathByID  map[int64]string
 	fileIDByPath  map[string]int64
 	fileHashByPath map[string]string
@@ -108,7 +108,7 @@ func NewProtoIndex(options ...Option) (*ProtoIndex, error) {
 		nextDeclID:          1,
 		modulesByName:       make(map[string]int64),
 		moduleByID:          make(map[int64]*indexpb.Module),
-		fileByID:            make(map[int64]*indexpb.File),
+		fileByID:            make(map[int64]*indexpb.Object),
 		filePathByID:        make(map[int64]string),
 		fileIDByPath:        make(map[string]int64),
 		fileHashByPath:      make(map[string]string),
@@ -233,22 +233,22 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 	fileID := i.nextFileID
 	i.nextFileID++
 
-	file := &indexpb.File{
-		LocalId:        fileID,
-		ModuleId:       nil,
-		ModulePath:     modulePath,
-		FilesystemPath: path,
-		Filetype:       filetype,
-		Content:        contents,
-		Declarations:   []*indexpb.Declaration{},
-		Refs:           []*indexpb.SymbolRef{},
+	file := &indexpb.Object{
+		LocalId:         fileID,
+		ModuleId:        nil,
+		ModulePath:      modulePath,
+		FilesystemPath:  path,
+		Filetype:        filetype,
+		Content:         contents,
+		SymbolInstances: []*indexpb.SymbolInstance{},
+		Refs:            []*indexpb.SymbolRef{},
 	}
 
 	if moduleId != nil {
 		moduleValue := int64(*moduleId)
 		file.ModuleId = &moduleValue
 	}
-	i.project.Files = append(i.project.Files, file)
+	i.project.Objects = append(i.project.Objects, file)
 	fileHash := computeHash(contents)
 
 	i.fileByID[fileID] = file
@@ -315,7 +315,7 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 	declID := DeclarationId(i.nextDeclID)
 	i.nextDeclID++
 
-	file.Declarations = append(file.Declarations, &indexpb.Declaration{
+	file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
 		SymbolLocalId: symbolID,
 		SymbolType:    toProtoType(symbolType),
 		StartOffset:   int32(start.Offset),
