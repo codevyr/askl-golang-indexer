@@ -168,10 +168,14 @@ func fromProtoScope(scope indexpb.SymbolScope) SymbolScope {
 
 func toProtoType(symbolType SymbolType) indexpb.SymbolType {
 	switch symbolType {
-	case SymbolTypeDefinition:
-		return indexpb.SymbolType_DEFINITION
-	case SymbolTypeDeclaration:
-		return indexpb.SymbolType_DECLARATION
+	case SymbolTypeFunction:
+		return indexpb.SymbolType_FUNCTION
+	case SymbolTypeFile:
+		return indexpb.SymbolType_FILE
+	case SymbolTypeModule:
+		return indexpb.SymbolType_MODULE
+	case SymbolTypeDirectory:
+		return indexpb.SymbolType_DIRECTORY
 	default:
 		return indexpb.SymbolType_SYMBOL_TYPE_UNSPECIFIED
 	}
@@ -283,6 +287,7 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 			LocalId: symbolID,
 			Name:    name,
 			Scope:   toProtoScope(scope),
+			Type:    toProtoType(symbolType),
 		}
 
 		module.Symbols = append(module.Symbols, symbol)
@@ -317,7 +322,6 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 
 	file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
 		SymbolLocalId: symbolID,
-		SymbolType:    toProtoType(symbolType),
 		StartOffset:   int32(start.Offset),
 		EndOffset:     int32(end.Offset),
 	})
