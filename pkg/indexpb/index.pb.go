@@ -74,21 +74,27 @@ type SymbolType int32
 
 const (
 	SymbolType_SYMBOL_TYPE_UNSPECIFIED SymbolType = 0
-	SymbolType_DEFINITION              SymbolType = 1
-	SymbolType_DECLARATION             SymbolType = 2
+	SymbolType_FUNCTION                SymbolType = 1
+	SymbolType_FILE                    SymbolType = 2
+	SymbolType_MODULE                  SymbolType = 3
+	SymbolType_DIRECTORY               SymbolType = 4
 )
 
 // Enum value maps for SymbolType.
 var (
 	SymbolType_name = map[int32]string{
 		0: "SYMBOL_TYPE_UNSPECIFIED",
-		1: "DEFINITION",
-		2: "DECLARATION",
+		1: "FUNCTION",
+		2: "FILE",
+		3: "MODULE",
+		4: "DIRECTORY",
 	}
 	SymbolType_value = map[string]int32{
 		"SYMBOL_TYPE_UNSPECIFIED": 0,
-		"DEFINITION":              1,
-		"DECLARATION":             2,
+		"FUNCTION":                1,
+		"FILE":                    2,
+		"MODULE":                  3,
+		"DIRECTORY":               4,
 	}
 )
 
@@ -352,6 +358,7 @@ type Symbol struct {
 	LocalId       int64                  `protobuf:"varint,1,opt,name=local_id,json=localId,proto3" json:"local_id,omitempty"` // Unique within project
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Scope         SymbolScope            `protobuf:"varint,3,opt,name=scope,proto3,enum=askl.index.SymbolScope" json:"scope,omitempty"`
+	Type          SymbolType             `protobuf:"varint,4,opt,name=type,proto3,enum=askl.index.SymbolType" json:"type,omitempty"` // Function, File, Module, or Directory
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -407,10 +414,16 @@ func (x *Symbol) GetScope() SymbolScope {
 	return SymbolScope_SYMBOL_SCOPE_UNSPECIFIED
 }
 
+func (x *Symbol) GetType() SymbolType {
+	if x != nil {
+		return x.Type
+	}
+	return SymbolType_SYMBOL_TYPE_UNSPECIFIED
+}
+
 type SymbolInstance struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SymbolLocalId int64                  `protobuf:"varint,1,opt,name=symbol_local_id,json=symbolLocalId,proto3" json:"symbol_local_id,omitempty"` // References Symbol.local_id
-	SymbolType    SymbolType             `protobuf:"varint,2,opt,name=symbol_type,json=symbolType,proto3,enum=askl.index.SymbolType" json:"symbol_type,omitempty"`
 	StartOffset   int32                  `protobuf:"varint,3,opt,name=start_offset,json=startOffset,proto3" json:"start_offset,omitempty"`
 	EndOffset     int32                  `protobuf:"varint,4,opt,name=end_offset,json=endOffset,proto3" json:"end_offset,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -452,13 +465,6 @@ func (x *SymbolInstance) GetSymbolLocalId() int64 {
 		return x.SymbolLocalId
 	}
 	return 0
-}
-
-func (x *SymbolInstance) GetSymbolType() SymbolType {
-	if x != nil {
-		return x.SymbolType
-	}
-	return SymbolType_SYMBOL_TYPE_UNSPECIFIED
 }
 
 func (x *SymbolInstance) GetStartOffset() int32 {
@@ -562,18 +568,17 @@ const file_proto_index_proto_rawDesc = "" +
 	"\x10symbol_instances\x18\a \x03(\v2\x1a.askl.index.SymbolInstanceR\x0fsymbolInstances\x12)\n" +
 	"\x04refs\x18\b \x03(\v2\x15.askl.index.SymbolRefR\x04refsB\f\n" +
 	"\n" +
-	"_module_id\"f\n" +
+	"_module_id\"\x92\x01\n" +
 	"\x06Symbol\x12\x19\n" +
 	"\blocal_id\x18\x01 \x01(\x03R\alocalId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12-\n" +
-	"\x05scope\x18\x03 \x01(\x0e2\x17.askl.index.SymbolScopeR\x05scope\"\xb3\x01\n" +
+	"\x05scope\x18\x03 \x01(\x0e2\x17.askl.index.SymbolScopeR\x05scope\x12*\n" +
+	"\x04type\x18\x04 \x01(\x0e2\x16.askl.index.SymbolTypeR\x04type\"\x80\x01\n" +
 	"\x0eSymbolInstance\x12&\n" +
-	"\x0fsymbol_local_id\x18\x01 \x01(\x03R\rsymbolLocalId\x127\n" +
-	"\vsymbol_type\x18\x02 \x01(\x0e2\x16.askl.index.SymbolTypeR\n" +
-	"symbolType\x12!\n" +
+	"\x0fsymbol_local_id\x18\x01 \x01(\x03R\rsymbolLocalId\x12!\n" +
 	"\fstart_offset\x18\x03 \x01(\x05R\vstartOffset\x12\x1d\n" +
 	"\n" +
-	"end_offset\x18\x04 \x01(\x05R\tendOffset\"\x8c\x01\n" +
+	"end_offset\x18\x04 \x01(\x05R\tendOffsetJ\x04\b\x02\x10\x03\"\x8c\x01\n" +
 	"\tSymbolRef\x12+\n" +
 	"\x12to_symbol_local_id\x18\x01 \x01(\x03R\x0ftoSymbolLocalId\x12*\n" +
 	"\x11from_offset_start\x18\x02 \x01(\x05R\x0ffromOffsetStart\x12&\n" +
@@ -582,13 +587,15 @@ const file_proto_index_proto_rawDesc = "" +
 	"\x18SYMBOL_SCOPE_UNSPECIFIED\x10\x00\x12\t\n" +
 	"\x05LOCAL\x10\x01\x12\n" +
 	"\n" +
-	"\x06GLOBAL\x10\x02*J\n" +
+	"\x06GLOBAL\x10\x02*\\\n" +
 	"\n" +
 	"SymbolType\x12\x1b\n" +
-	"\x17SYMBOL_TYPE_UNSPECIFIED\x10\x00\x12\x0e\n" +
+	"\x17SYMBOL_TYPE_UNSPECIFIED\x10\x00\x12\f\n" +
+	"\bFUNCTION\x10\x01\x12\b\n" +
+	"\x04FILE\x10\x02\x12\n" +
 	"\n" +
-	"DEFINITION\x10\x01\x12\x0f\n" +
-	"\vDECLARATION\x10\x02B<Z:github.com/planetA/askl-golang-indexer/pkg/indexpb;indexpbb\x06proto3"
+	"\x06MODULE\x10\x03\x12\r\n" +
+	"\tDIRECTORY\x10\x04B<Z:github.com/planetA/askl-golang-indexer/pkg/indexpb;indexpbb\x06proto3"
 
 var (
 	file_proto_index_proto_rawDescOnce sync.Once
@@ -621,7 +628,7 @@ var file_proto_index_proto_depIdxs = []int32{
 	6, // 3: askl.index.Object.symbol_instances:type_name -> askl.index.SymbolInstance
 	7, // 4: askl.index.Object.refs:type_name -> askl.index.SymbolRef
 	0, // 5: askl.index.Symbol.scope:type_name -> askl.index.SymbolScope
-	1, // 6: askl.index.SymbolInstance.symbol_type:type_name -> askl.index.SymbolType
+	1, // 6: askl.index.Symbol.type:type_name -> askl.index.SymbolType
 	7, // [7:7] is the sub-list for method output_type
 	7, // [7:7] is the sub-list for method input_type
 	7, // [7:7] is the sub-list for extension type_name

@@ -64,18 +64,24 @@ type SymbolType int
 
 func (s SymbolType) String() string {
 	switch s {
-	case SymbolTypeDeclaration:
-		return "declaration"
-	case SymbolTypeDefinition:
-		return "definition"
+	case SymbolTypeFunction:
+		return "function"
+	case SymbolTypeFile:
+		return "file"
+	case SymbolTypeModule:
+		return "module"
+	case SymbolTypeDirectory:
+		return "directory"
 	default:
 		return "unknown"
 	}
 }
 
 const (
-	SymbolTypeDeclaration SymbolType = iota + 1
-	SymbolTypeDefinition
+	SymbolTypeFunction SymbolType = iota + 1
+	SymbolTypeFile
+	SymbolTypeModule
+	SymbolTypeDirectory
 )
 
 type SymbolId int
