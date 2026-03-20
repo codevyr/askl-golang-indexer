@@ -14,10 +14,10 @@ import (
 	"github.com/planetA/askl-golang-indexer/pkg/logging"
 )
 
+// symbolKey is now project-scoped (no moduleID)
 type symbolKey struct {
-	moduleID int64
-	name     string
-	scope    SymbolScope
+	name  string
+	scope SymbolScope
 }
 
 type fileNameKey struct {
@@ -55,6 +55,13 @@ type referenceLog struct {
 	end      token.Position
 }
 
+// moduleInfo tracks module data for creating module symbols at finalization
+type moduleInfo struct {
+	name     string
+	symbolID int64   // Set when module symbol is created
+	fileIDs  []int64 // Files belonging to this module
+}
+
 type ProtoIndex struct {
 	mu sync.Mutex
 
@@ -67,18 +74,20 @@ type ProtoIndex struct {
 	nextSymbolID int64
 	nextDeclID   int64
 
+	// Module tracking (for creating module symbols)
 	modulesByName map[string]int64
-	moduleByID    map[int64]*indexpb.Module
+	moduleByID    map[int64]*moduleInfo
 
-	fileByID      map[int64]*indexpb.Object
-	filePathByID  map[int64]string
-	fileIDByPath  map[string]int64
+	fileByID       map[int64]*indexpb.Object
+	filePathByID   map[int64]string
+	fileIDByPath   map[string]int64
 	fileHashByPath map[string]string
+	fileModuleID   map[int64]int64 // Maps fileID -> moduleID for module instance creation
 
-	symbolByKey         map[symbolKey]int64
-	symbolByID          map[int64]*indexpb.Symbol
-	symbolNameByID      map[int64]string
-	symbolModuleIDByID  map[int64]int64
+	// Symbols are now project-scoped
+	symbolByKey        map[symbolKey]int64
+	symbolByID         map[int64]*indexpb.Symbol
+	symbolNameByID     map[int64]string
 	symbolByFileAndName map[fileNameKey]int64
 
 	declIDByKey   map[declKey]DeclarationId
@@ -107,15 +116,15 @@ func NewProtoIndex(options ...Option) (*ProtoIndex, error) {
 		nextSymbolID:        1,
 		nextDeclID:          1,
 		modulesByName:       make(map[string]int64),
-		moduleByID:          make(map[int64]*indexpb.Module),
+		moduleByID:          make(map[int64]*moduleInfo),
 		fileByID:            make(map[int64]*indexpb.Object),
 		filePathByID:        make(map[int64]string),
 		fileIDByPath:        make(map[string]int64),
 		fileHashByPath:      make(map[string]string),
+		fileModuleID:        make(map[int64]int64),
 		symbolByKey:         make(map[symbolKey]int64),
 		symbolByID:          make(map[int64]*indexpb.Symbol),
 		symbolNameByID:      make(map[int64]string),
-		symbolModuleIDByID:  make(map[int64]int64),
 		symbolByFileAndName: make(map[fileNameKey]int64),
 		declIDByKey:         make(map[declKey]DeclarationId),
 		declsByFile:         make(map[int64][]declEntry),
@@ -130,6 +139,9 @@ func (i *ProtoIndex) Marshal() ([]byte, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	// Create module symbols before marshaling
+	i.createModuleSymbols()
+
 	return proto.Marshal(i.project)
 }
 
@@ -137,7 +149,55 @@ func (i *ProtoIndex) Upload() *indexpb.Project {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	// Create module symbols before uploading
+	i.createModuleSymbols()
+
 	return proto.Clone(i.project).(*indexpb.Project)
+}
+
+// createModuleSymbols creates MODULE type symbols for each tracked module
+// and creates symbol instances covering each file in the module.
+// This must be called with the mutex held.
+func (i *ProtoIndex) createModuleSymbols() {
+	for moduleID, info := range i.moduleByID {
+		// Skip if already created
+		if info.symbolID != 0 {
+			continue
+		}
+
+		// Create module symbol (project-scoped, scope=UNSPECIFIED for modules)
+		symbolID := i.nextSymbolID
+		i.nextSymbolID++
+
+		symbol := &indexpb.Symbol{
+			LocalId: symbolID,
+			Name:    info.name,
+			Scope:   indexpb.SymbolScope_SYMBOL_SCOPE_UNSPECIFIED,
+			Type:    indexpb.SymbolType_MODULE,
+		}
+
+		i.project.Symbols = append(i.project.Symbols, symbol)
+		i.symbolByID[symbolID] = symbol
+		i.symbolNameByID[symbolID] = info.name
+		info.symbolID = symbolID
+		i.moduleByID[moduleID] = info
+
+		// Create module symbol instances for each file in the module
+		for _, fileID := range info.fileIDs {
+			file := i.fileByID[fileID]
+			if file == nil {
+				continue
+			}
+
+			// Module instance covers entire file
+			fileLen := int32(len(file.Content))
+			file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
+				SymbolLocalId: symbolID,
+				StartOffset:   0,
+				EndOffset:     fileLen,
+			})
+		}
+	}
 }
 
 func computeHash(contents []byte) string {
@@ -192,14 +252,14 @@ func (i *ProtoIndex) AddModule(moduleName string) (ModuleId, error) {
 	moduleID := i.nextModuleID
 	i.nextModuleID++
 
-	module := &indexpb.Module{
-		LocalId:    moduleID,
-		ModuleName: moduleName,
+	// Track module info (symbol will be created at finalization)
+	info := &moduleInfo{
+		name:    moduleName,
+		fileIDs: []int64{},
 	}
 
 	i.modulesByName[moduleName] = moduleID
-	i.moduleByID[moduleID] = module
-	i.project.Modules = append(i.project.Modules, module)
+	i.moduleByID[moduleID] = info
 
 	return ModuleId(moduleID), nil
 }
@@ -209,8 +269,8 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 	defer i.mu.Unlock()
 
 	if moduleId != nil {
-		module := i.moduleByID[int64(*moduleId)]
-		if module == nil {
+		info := i.moduleByID[int64(*moduleId)]
+		if info == nil {
 			return FileId(-1), fmt.Errorf("module %d not found", *moduleId)
 		}
 	}
@@ -237,9 +297,9 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 	fileID := i.nextFileID
 	i.nextFileID++
 
+	// Object no longer has module_id field
 	file := &indexpb.Object{
 		LocalId:         fileID,
-		ModuleId:        nil,
 		ModulePath:      modulePath,
 		FilesystemPath:  path,
 		Filetype:        filetype,
@@ -248,10 +308,6 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 		Refs:            []*indexpb.SymbolRef{},
 	}
 
-	if moduleId != nil {
-		moduleValue := int64(*moduleId)
-		file.ModuleId = &moduleValue
-	}
 	i.project.Objects = append(i.project.Objects, file)
 	fileHash := computeHash(contents)
 
@@ -260,6 +316,15 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 	i.fileIDByPath[path] = fileID
 	i.fileHashByPath[path] = fileHash
 
+	// Track file->module mapping for module instance creation
+	if moduleId != nil {
+		i.fileModuleID[fileID] = int64(*moduleId)
+		info := i.moduleByID[int64(*moduleId)]
+		if info != nil {
+			info.fileIDs = append(info.fileIDs, fileID)
+		}
+	}
+
 	return FileId(fileID), nil
 }
 
@@ -267,8 +332,8 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	module := i.moduleByID[int64(moduleId)]
-	if module == nil {
+	info := i.moduleByID[int64(moduleId)]
+	if info == nil {
 		return -1, -1, fmt.Errorf("module %d not found", moduleId)
 	}
 
@@ -277,7 +342,8 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 		return -1, -1, fmt.Errorf("file %d not found", fileId)
 	}
 
-	symKey := symbolKey{moduleID: int64(moduleId), name: name, scope: scope}
+	// Symbol key is now project-scoped (no moduleID)
+	symKey := symbolKey{name: name, scope: scope}
 	symbolID, ok := i.symbolByKey[symKey]
 	if !ok {
 		symbolID = i.nextSymbolID
@@ -290,11 +356,11 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 			Type:    toProtoType(symbolType),
 		}
 
-		module.Symbols = append(module.Symbols, symbol)
+		// Add symbol directly to project.Symbols (not module.Symbols)
+		i.project.Symbols = append(i.project.Symbols, symbol)
 		i.symbolByKey[symKey] = symbolID
 		i.symbolByID[symbolID] = symbol
 		i.symbolNameByID[symbolID] = name
-		i.symbolModuleIDByID[symbolID] = int64(moduleId)
 	}
 
 	filePath := i.filePathByID[int64(fileId)]
@@ -361,7 +427,8 @@ func (i *ProtoIndex) FindSymbolId(moduleId ModuleId, fileId FileId, name string,
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	symbolID, ok := i.symbolByKey[symbolKey{moduleID: int64(moduleId), name: name, scope: scope}]
+	// Symbol key is now project-scoped
+	symbolID, ok := i.symbolByKey[symbolKey{name: name, scope: scope}]
 	if !ok {
 		return SymbolId(-1), DeclarationId(-1), fmt.Errorf("symbol not found")
 	}
@@ -399,12 +466,12 @@ func (i *ProtoIndex) GetAllSymbols() ([]SymbolDecl, error) {
 
 	symbols := []SymbolDecl{}
 	for fileID, decls := range i.declsByFile {
+		moduleID := i.fileModuleID[fileID]
 		for _, decl := range decls {
 			symbol := i.symbolByID[decl.symbolID]
 			if symbol == nil {
 				continue
 			}
-			moduleID := i.symbolModuleIDByID[decl.symbolID]
 			symbols = append(symbols, SymbolDecl{
 				ModuleId:   ModuleId(moduleID),
 				FileId:     FileId(fileID),
