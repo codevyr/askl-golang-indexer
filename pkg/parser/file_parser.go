@@ -205,12 +205,35 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 
 func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (bool, error) {
 	// Check if the node is a function declaration
+	var fullName string
 	obj, ok := f.pkg.TypesInfo.Defs[fn.Name]
-	if !ok {
-		return false, fmt.Errorf("expected to find definition %s", fn.Name)
+	if ok {
+		objFunc := obj.(*types.Func)
+		fullName = objFunc.FullName()
+	} else {
+		// For compiler-provided packages like "unsafe", TypesInfo.Defs is empty
+		// Try to lookup the function in the package's type scope
+		if f.pkg.Types != nil {
+			scopeObj := f.pkg.Types.Scope().Lookup(fn.Name.Name)
+			if scopeObj != nil {
+				if objFunc, ok := scopeObj.(*types.Func); ok {
+					fullName = objFunc.FullName()
+				} else if objBuiltin, ok := scopeObj.(*types.Builtin); ok {
+					// For builtin functions (like unsafe.Sizeof which is a Builtin type)
+					fullName = f.pkg.PkgPath + "." + objBuiltin.Name()
+				} else {
+					// Fallback: construct the name manually
+					fullName = f.pkg.PkgPath + "." + fn.Name.Name
+				}
+			} else {
+				// Object not found in scope, skip this function
+				logging.Debugf("Function %s not found in package scope %s, skipping", fn.Name.Name, f.pkg.PkgPath)
+				return true, nil
+			}
+		} else {
+			return false, fmt.Errorf("expected to find definition %s", fn.Name)
+		}
 	}
-	objFunc := obj.(*types.Func)
-	fullName := objFunc.FullName()
 
 	symbolScope := GetSymbolScope(fn.Name.Name)
 
@@ -272,6 +295,8 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec) bool
 }
 
 func (f *FileParser) Parse(parser *ParsingStage) (err error) {
+	// Process imports to create module-to-module references
+	f.parseImports()
 
 	ast.Inspect(f.ast, func(n ast.Node) bool {
 		if err != nil {
@@ -313,4 +338,32 @@ func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 
 func (p *FileParser) GetId() (string, bool) {
 	return p.filepath, true
+}
+
+// parseImports processes import declarations to create module-to-module references.
+// Each import statement creates a reference from the current module to the imported module.
+func (f *FileParser) parseImports() {
+	for _, imp := range f.ast.Imports {
+		if imp.Path == nil {
+			continue
+		}
+
+		// Get the import path (remove quotes)
+		importPath := imp.Path.Value
+		if len(importPath) >= 2 && importPath[0] == '"' && importPath[len(importPath)-1] == '"' {
+			importPath = importPath[1 : len(importPath)-1]
+		}
+
+		// Get the position of the import statement
+		startPos := f.pkg.Fset.Position(imp.Pos())
+		endPos := f.pkg.Fset.Position(imp.End())
+
+		// Add module import reference
+		// Note: If the target module isn't indexed, the reference will be skipped
+		// during resolveModuleImports (with a debug log)
+		err := f.index.AddModuleImport(f.moduleId, importPath, f.fileId, startPos.Offset, endPos.Offset)
+		if err != nil {
+			logging.Warnf("Failed to add module import %s -> %s: %v", f.pkg.PkgPath, importPath, err)
+		}
+	}
 }
