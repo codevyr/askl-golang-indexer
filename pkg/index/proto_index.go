@@ -55,6 +55,15 @@ type referenceLog struct {
 	end      token.Position
 }
 
+// moduleImportLog tracks module-to-module import relationships
+type moduleImportLog struct {
+	fromModuleID int64
+	toModuleName string
+	fromFileID   int64
+	startOffset  int
+	endOffset    int
+}
+
 // moduleInfo tracks module data for creating module symbols at finalization
 type moduleInfo struct {
 	name     string
@@ -93,7 +102,8 @@ type ProtoIndex struct {
 	declIDByKey   map[declKey]DeclarationId
 	declsByFile   map[int64][]declEntry
 	declsByLookup map[declLookupKey][]DeclarationId
-	referencesLog []referenceLog
+	referencesLog    []referenceLog
+	moduleImportsLog []moduleImportLog
 }
 
 var _ Index = &ProtoIndex{}
@@ -130,6 +140,7 @@ func NewProtoIndex(options ...Option) (*ProtoIndex, error) {
 		declsByFile:         make(map[int64][]declEntry),
 		declsByLookup:       make(map[declLookupKey][]DeclarationId),
 		referencesLog:       []referenceLog{},
+		moduleImportsLog:    []moduleImportLog{},
 	}
 
 	return idx, nil
@@ -198,6 +209,58 @@ func (i *ProtoIndex) createModuleSymbols() {
 			})
 		}
 	}
+
+	// Resolve module imports after all module symbols are created
+	i.resolveModuleImports()
+}
+
+// resolveModuleImports converts logged module imports into symbol references.
+// This must be called after createModuleSymbols and with the mutex held.
+func (i *ProtoIndex) resolveModuleImports() {
+	seen := make(map[refDedupKey]struct{})
+	for _, imp := range i.moduleImportsLog {
+		// Find the target module's symbol ID by name
+		toModuleID, ok := i.modulesByName[imp.toModuleName]
+		if !ok {
+			// Target module not indexed - skip (could be external dependency)
+			logging.Debugf("Module import target not found: %s", imp.toModuleName)
+			continue
+		}
+
+		toInfo := i.moduleByID[toModuleID]
+		if toInfo == nil || toInfo.symbolID == 0 {
+			logging.Warnf("Module import target has no symbol: %s", imp.toModuleName)
+			continue
+		}
+
+		// Get the file where the import appears
+		file := i.fileByID[imp.fromFileID]
+		if file == nil {
+			logging.Warnf("Import source file not found: %d", imp.fromFileID)
+			continue
+		}
+
+		// Deduplicate
+		dedupKey := refDedupKey{
+			toSymbolID: toInfo.symbolID,
+			fromFile:   imp.fromFileID,
+			start:      int32(imp.startOffset),
+			end:        int32(imp.endOffset),
+		}
+		if _, ok := seen[dedupKey]; ok {
+			continue
+		}
+		seen[dedupKey] = struct{}{}
+
+		// Add the reference from the import statement to the module symbol
+		file.Refs = append(file.Refs, &indexpb.SymbolRef{
+			ToSymbolLocalId: toInfo.symbolID,
+			FromOffsetStart: int32(imp.startOffset),
+			FromOffsetEnd:   int32(imp.endOffset),
+		})
+	}
+
+	i.moduleImportsLog = nil
 }
 
 func computeHash(contents []byte) string {
@@ -262,6 +325,23 @@ func (i *ProtoIndex) AddModule(moduleName string) (ModuleId, error) {
 	i.moduleByID[moduleID] = info
 
 	return ModuleId(moduleID), nil
+}
+
+// AddModuleImport logs an import relationship from one module to another.
+// The import is recorded with the file and offset positions where the import statement appears.
+func (i *ProtoIndex) AddModuleImport(fromModuleId ModuleId, toModuleName string, fromFileId FileId, startOffset, endOffset int) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	i.moduleImportsLog = append(i.moduleImportsLog, moduleImportLog{
+		fromModuleID: int64(fromModuleId),
+		toModuleName: toModuleName,
+		fromFileID:   int64(fromFileId),
+		startOffset:  startOffset,
+		endOffset:    endOffset,
+	})
+
+	return nil
 }
 
 func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string, contents []byte) (FileId, error) {
@@ -603,14 +683,33 @@ func (i *ProtoIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
+	// Ensure module symbols and module import refs are created
+	i.createModuleSymbols()
+
 	var references []*ReferenceNames
 	for fileID, file := range i.fileByID {
 		if len(file.Refs) == 0 {
 			continue
 		}
 		decls := i.declsByFile[fileID]
+
+		// Get module name for this file (for module-level refs)
+		moduleID := i.fileModuleID[fileID]
+		moduleInfo := i.moduleByID[moduleID]
+		var moduleName string
+		if moduleInfo != nil {
+			moduleName = moduleInfo.name
+		}
+
 		for _, ref := range file.Refs {
 			toName := i.symbolNameByID[ref.ToSymbolLocalId]
+
+			// Check if the target is a module symbol
+			toSymbol := i.symbolByID[ref.ToSymbolLocalId]
+			isModuleImportRef := toSymbol != nil && toSymbol.Type == indexpb.SymbolType_MODULE
+
+			// Check if this ref is contained in any function declaration
+			foundContainingDecl := false
 			for _, decl := range decls {
 				if decl.start <= int(ref.FromOffsetStart) && decl.end >= int(ref.FromOffsetEnd) {
 					fromName := i.symbolNameByID[decl.symbolID]
@@ -618,7 +717,17 @@ func (i *ProtoIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 						From: fromName,
 						To:   toName,
 					})
+					foundContainingDecl = true
 				}
+			}
+
+			// If this is a module import ref and no containing declaration found,
+			// attribute it to the module itself
+			if isModuleImportRef && !foundContainingDecl && moduleName != "" {
+				references = append(references, &ReferenceNames{
+					From: moduleName,
+					To:   toName,
+				})
 			}
 		}
 	}

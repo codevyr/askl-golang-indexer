@@ -36,10 +36,20 @@ var builtinSymbols = []*index.SymbolDecl{
 	index.NewSymbol(1, 1, "builtin.real", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
 	index.NewSymbol(1, 1, "builtin.recover", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
 	index.NewSymbol(1, 1, "(builtin.error).Error", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-	index.NewSymbol(2, 2, "cmp.Compare", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-	index.NewSymbol(2, 2, "cmp.Less", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-	index.NewSymbol(2, 2, "cmp.Or", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-	index.NewSymbol(2, 2, "cmp.isNaN", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	// unsafe package functions (manually parsed from compiler-provided package)
+	index.NewSymbol(2, 2, "unsafe.Sizeof", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.Offsetof", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.Alignof", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.Add", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.Slice", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.SliceData", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.String", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.StringData", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	// cmp package functions
+	index.NewSymbol(3, 3, "cmp.Compare", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(3, 3, "cmp.Less", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(3, 3, "cmp.Or", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(3, 3, "cmp.isNaN", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
 }
 
 var builtinReferences = []*index.ReferenceNames{
@@ -47,6 +57,8 @@ var builtinReferences = []*index.ReferenceNames{
 	index.NewReferenceNames("cmp.Less", "cmp.isNaN"),
 	index.NewReferenceNames("cmp.Compare", "cmp.isNaN"),
 	index.NewReferenceNames("cmp.Compare", "cmp.isNaN"),
+	// Module import: builtin imports cmp
+	index.NewReferenceNames("builtin", "cmp"),
 }
 
 func sortedSymbols(symbols []index.SymbolDecl) []*index.SymbolDecl {
@@ -145,6 +157,8 @@ var _ = Describe("PackageParser", func() {
 				builtinReferences,
 				index.NewReferenceNames("generic_instantiation/app.Call", "generic_instantiation/app.Doer).Foo"),
 				index.NewReferenceNames("generic_instantiation/app.Doer).Foo", "generic_instantiation/lib.Box[T]).Foo"),
+				// Module import: app imports lib
+				index.NewReferenceNames("generic_instantiation/app", "generic_instantiation/lib"),
 			),
 		),
 		Entry("is unsafe", "unsafe",
@@ -162,6 +176,8 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("unsafe.MockFunction", "builtin.print"),
 				index.NewReferenceNames("unsafe.MockFunction", "builtin.print"),
 				index.NewReferenceNames("unsafe.MockFunction", "builtin.print"),
+				// Module import: test unsafe package imports standard unsafe package
+				index.NewReferenceNames("test/src/unsafe", "unsafe"),
 			),
 		),
 		Entry("has duplicate interface refs", "duplicate_refs",
@@ -575,6 +591,28 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("ClearUnknown", "builtin.print"),
 				index.NewReferenceNames("(interface).Has", "fieldNum).Has"),
 				index.NewReferenceNames("MockFunction", "ClearUnknown"),
+			),
+		),
+		// This test verifies:
+		// 1. Function call references (UseProvider -> Hello, UseBuiltinAndUnsafe -> make/len)
+		// 2. Module import references (consumer -> provider, consumer -> unsafe)
+		Entry("checks module imports", "module_imports/consumer",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "module_imports/consumer.UseProvider", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "module_imports/consumer.UseBuiltinAndUnsafe", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "module_imports/provider.Hello", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+			),
+			append(
+				builtinReferences,
+				// Function call reference: UseProvider calls Hello
+				index.NewReferenceNames("module_imports/consumer.UseProvider", "module_imports/provider.Hello"),
+				// UseBuiltinAndUnsafe calls builtin functions (make, len)
+				index.NewReferenceNames("module_imports/consumer.UseBuiltinAndUnsafe", "builtin.make"),
+				index.NewReferenceNames("module_imports/consumer.UseBuiltinAndUnsafe", "builtin.len"),
+				// Module import references: consumer imports provider and unsafe
+				index.NewReferenceNames("module_imports/consumer", "module_imports/provider"),
+				index.NewReferenceNames("module_imports/consumer", "unsafe"),
 			),
 		),
 	)

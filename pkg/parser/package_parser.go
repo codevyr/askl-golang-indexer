@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"go/ast"
+	goparser "go/parser"
 	"go/token"
 	"go/types"
 	"unicode"
@@ -38,21 +39,42 @@ func NewPackageParser(p *Parser, pkg *packages.Package, index index.Index, conti
 	}
 }
 
-func (p *PackageParser) Parse(parser *ParsingStage) error {
-	if len(p.pkg.CompiledGoFiles) != len(p.pkg.Syntax) {
-		logging.Errorf("%v %v", p.pkg.CompiledGoFiles, p.pkg.Syntax)
-		return fmt.Errorf("not all files in a package have been parsed")
+// parseFile creates a FileParser for the given file and AST, then parses it.
+func (p *PackageParser) parseFile(parser *ParsingStage, filePath string, astFile *ast.File) error {
+	fileParser, err := NewFileParser(parser, p.pkg, p.parser.rootPath, filePath, astFile, p.index)
+	if err != nil {
+		return err
 	}
+	return parser.Parse(fileParser)
+}
 
-	logging.Infof("Parsing package %s (%s) with %d files", p.pkg.Name, p.pkg.PkgPath, len(p.pkg.CompiledGoFiles))
-	for i, file := range p.pkg.CompiledGoFiles {
-		fileParser, err := NewFileParser(parser, p.pkg, p.parser.rootPath, file, p.pkg.Syntax[i], p.index)
-		if err != nil {
-			return err
+func (p *PackageParser) Parse(parser *ParsingStage) error {
+	// Handle packages with GoFiles but empty CompiledGoFiles/Syntax
+	// This happens for compiler-provided packages like "unsafe"
+	if len(p.pkg.CompiledGoFiles) == 0 && len(p.pkg.GoFiles) > 0 {
+		logging.Infof("Parsing package %s (%s) with %d files (manually parsed)", p.pkg.Name, p.pkg.PkgPath, len(p.pkg.GoFiles))
+		for _, file := range p.pkg.GoFiles {
+			// Manually parse the source file
+			astFile, err := goparser.ParseFile(p.pkg.Fset, file, nil, goparser.ParseComments)
+			if err != nil {
+				logging.Warnf("Failed to parse file %s: %v", file, err)
+				continue
+			}
+			if err := p.parseFile(parser, file, astFile); err != nil {
+				return err
+			}
+		}
+	} else {
+		if len(p.pkg.CompiledGoFiles) != len(p.pkg.Syntax) {
+			logging.Errorf("%v %v", p.pkg.CompiledGoFiles, p.pkg.Syntax)
+			return fmt.Errorf("not all files in a package have been parsed")
 		}
 
-		if err := parser.Parse(fileParser); err != nil {
-			return err
+		logging.Infof("Parsing package %s (%s) with %d files", p.pkg.Name, p.pkg.PkgPath, len(p.pkg.CompiledGoFiles))
+		for i, file := range p.pkg.CompiledGoFiles {
+			if err := p.parseFile(parser, file, p.pkg.Syntax[i]); err != nil {
+				return err
+			}
 		}
 	}
 
