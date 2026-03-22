@@ -152,8 +152,8 @@ func (i *ProtoIndex) Marshal() ([]byte, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	// Create module symbols before marshaling
 	i.createModuleSymbols()
+	i.createDirectorySymbols()
 
 	return proto.Marshal(i.project)
 }
@@ -162,8 +162,8 @@ func (i *ProtoIndex) Upload() *indexpb.Project {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	// Create module symbols before uploading
 	i.createModuleSymbols()
+	i.createDirectorySymbols()
 
 	return proto.Clone(i.project).(*indexpb.Project)
 }
@@ -263,6 +263,128 @@ func (i *ProtoIndex) resolveModuleImports() {
 	}
 
 	i.moduleImportsLog = nil
+}
+
+// createDirectorySymbols derives directory symbols from file paths.
+// For each unique ancestor directory, it creates:
+// - A DIRECTORY symbol
+// - A sentinel object (empty content, filetype="directory") with a self-instance [0,0)
+// - An instance on each direct child file's object [0, len) for containment
+// - A SymbolRef on each parent directory's sentinel pointing to the child directory
+// This must be called with the mutex held.
+func (i *ProtoIndex) createDirectorySymbols() {
+	// Step 1: Collect all directory paths from file paths
+	dirSet := make(map[string]struct{})
+	for _, path := range i.filePathByID {
+		dir := parentDir(path)
+		for {
+			dirSet[dir] = struct{}{}
+			if dir == "/" {
+				break
+			}
+			dir = parentDir(dir)
+		}
+	}
+
+	if len(dirSet) == 0 {
+		return
+	}
+
+	// Step 2: Create directory symbols and sentinel objects
+	dirSymbolID := make(map[string]int64)   // dir path -> symbol local ID
+	dirSentinel := make(map[string]*indexpb.Object) // dir path -> sentinel object
+
+	for dirPath := range dirSet {
+		symbolID := i.nextSymbolID
+		i.nextSymbolID++
+
+		symbol := &indexpb.Symbol{
+			LocalId: symbolID,
+			Name:    dirPath,
+			Scope:   indexpb.SymbolScope_SYMBOL_SCOPE_UNSPECIFIED,
+			Type:    indexpb.SymbolType_DIRECTORY,
+		}
+		i.project.Symbols = append(i.project.Symbols, symbol)
+		dirSymbolID[dirPath] = symbolID
+
+		// Create sentinel object
+		sentinelID := i.nextFileID
+		i.nextFileID++
+
+		sentinel := &indexpb.Object{
+			LocalId:         sentinelID,
+			ModulePath:      dirPath,
+			FilesystemPath:  dirPath,
+			Filetype:        "directory",
+			Content:         nil,
+			SymbolInstances: []*indexpb.SymbolInstance{},
+			Refs:            []*indexpb.SymbolRef{},
+		}
+
+		// Self-instance [0,0) on sentinel
+		sentinel.SymbolInstances = append(sentinel.SymbolInstances, &indexpb.SymbolInstance{
+			SymbolLocalId: symbolID,
+			StartOffset:   0,
+			EndOffset:     0,
+		})
+
+		i.project.Objects = append(i.project.Objects, sentinel)
+		dirSentinel[dirPath] = sentinel
+	}
+
+	// Step 3: Create directory instances on direct child files for containment
+	for fileID, filePath := range i.filePathByID {
+		file := i.fileByID[fileID]
+		if file == nil {
+			continue
+		}
+		parent := parentDir(filePath)
+		symID, ok := dirSymbolID[parent]
+		if !ok {
+			continue
+		}
+		fileLen := int32(len(file.Content))
+		file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
+			SymbolLocalId: symID,
+			StartOffset:   0,
+			EndOffset:     fileLen,
+		})
+	}
+
+	// Step 4: Create symbol_refs for parent→child directory relationships
+	for childDir := range dirSet {
+		parent := parentDir(childDir)
+		if parent == childDir {
+			continue // root's parent is itself
+		}
+		childSymID, ok := dirSymbolID[childDir]
+		if !ok {
+			continue
+		}
+		sentinel, ok := dirSentinel[parent]
+		if !ok {
+			continue
+		}
+		sentinel.Refs = append(sentinel.Refs, &indexpb.SymbolRef{
+			ToSymbolLocalId: childSymID,
+			FromOffsetStart: 0,
+			FromOffsetEnd:   0,
+		})
+	}
+}
+
+// parentDir returns the parent directory of a path.
+// "/" returns "/", "/foo" returns "/", "/foo/bar" returns "/foo".
+func parentDir(path string) string {
+	if path == "/" {
+		return "/"
+	}
+	path = strings.TrimRight(path, "/")
+	idx := strings.LastIndex(path, "/")
+	if idx <= 0 {
+		return "/"
+	}
+	return path[:idx]
 }
 
 func computeHash(contents []byte) string {
