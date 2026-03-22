@@ -85,11 +85,11 @@ const (
 )
 
 type SymbolId int
-type DeclarationId int
+type SymbolInstanceId int
 type ModuleId int64
 type FileId int64
 
-func (id DeclarationId) String() string {
+func (id SymbolInstanceId) String() string {
 	return strconv.Itoa(int(id))
 }
 
@@ -98,16 +98,16 @@ type Index interface {
 	AddModuleImport(fromModuleId ModuleId, toModuleName string, fromFileId FileId, startOffset, endOffset int) error
 	AddFile(moduleId *ModuleId, baseDir, path, filetype string, contents []byte) (FileId, error)
 
-	AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, DeclarationId, error)
-	FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, DeclarationId, error)
-	FindDeclarationId(name string, scope SymbolScope, symbolType SymbolType) ([]DeclarationId, error)
+	AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, SymbolInstanceId, error)
+	FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, SymbolInstanceId, error)
+	FindSymbolInstanceId(name string, scope SymbolScope, symbolType SymbolType) ([]SymbolInstanceId, error)
 	GetAllSymbols() ([]SymbolDecl, error)
 
 	AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position) error
 	ResolveReferences() error
 	GetAllReferencesNames() ([]*ReferenceNames, error)
 
-	FindBuiltinDeclaration(name string) (FileId, token.Position, token.Position, error)
+	FindBuiltinInstance(name string) (FileId, token.Position, token.Position, error)
 	FindFileId(path string) (FileId, error)
 
 	Wait() error

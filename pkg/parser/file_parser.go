@@ -82,7 +82,7 @@ func (f *FileParser) addInterfaceMethods(interfaceType *ast.InterfaceType) (bool
 }
 
 // Find function calls in a given FuncDecl
-func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, declId index.DeclarationId) (err error) {
+func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, instanceId index.SymbolInstanceId) (err error) {
 	if fn.Body == nil {
 		return
 	}
@@ -239,12 +239,12 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 
 	start := f.pkg.Fset.Position(fn.Pos())
 	end := f.pkg.Fset.Position(fn.End())
-	_, declId, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeFunction, start, end)
+	_, instanceId, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeFunction, start, end)
 	if err != nil {
 		return false, fmt.Errorf("failed to add symbol: %s", err)
 	}
 
-	err = f.functionBodyParser(parser, fn, declId)
+	err = f.functionBodyParser(parser, fn, instanceId)
 	if err != nil {
 		return false, err
 	}
