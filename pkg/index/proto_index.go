@@ -87,11 +87,12 @@ type ProtoIndex struct {
 	modulesByName map[string]int64
 	moduleByID    map[int64]*moduleInfo
 
-	fileByID       map[int64]*indexpb.Object
-	filePathByID   map[int64]string
-	fileIDByPath   map[string]int64
-	fileHashByPath map[string]string
-	fileModuleID   map[int64]int64 // Maps fileID -> moduleID for module instance creation
+	fileByID            map[int64]*indexpb.Object
+	filePathByID        map[int64]string
+	fileIDByPath        map[string]int64
+	fileHashByPath      map[string]string
+	fileModuleID        map[int64]int64 // Maps fileID -> moduleID for module instance creation
+	fileSymbolByObjectID map[int64]int64 // Maps objectID -> file symbol ID
 
 	// Symbols are now project-scoped
 	symbolByKey        map[symbolKey]int64
@@ -127,11 +128,12 @@ func NewProtoIndex(options ...Option) (*ProtoIndex, error) {
 		nextDeclID:          1,
 		modulesByName:       make(map[string]int64),
 		moduleByID:          make(map[int64]*moduleInfo),
-		fileByID:            make(map[int64]*indexpb.Object),
-		filePathByID:        make(map[int64]string),
-		fileIDByPath:        make(map[string]int64),
-		fileHashByPath:      make(map[string]string),
-		fileModuleID:        make(map[int64]int64),
+		fileByID:             make(map[int64]*indexpb.Object),
+		filePathByID:         make(map[int64]string),
+		fileIDByPath:         make(map[string]int64),
+		fileHashByPath:       make(map[string]string),
+		fileModuleID:         make(map[int64]int64),
+		fileSymbolByObjectID: make(map[int64]int64),
 		symbolByKey:         make(map[symbolKey]int64),
 		symbolByID:          make(map[int64]*indexpb.Symbol),
 		symbolNameByID:      make(map[int64]string),
@@ -387,6 +389,31 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 		SymbolInstances: []*indexpb.SymbolInstance{},
 		Refs:            []*indexpb.SymbolRef{},
 	}
+
+	// Create FILE symbol for this file
+	fileSymbolID := i.nextSymbolID
+	i.nextSymbolID++
+
+	fileSymbol := &indexpb.Symbol{
+		LocalId: fileSymbolID,
+		Name:    path, // Use filesystem path as symbol name
+		Scope:   indexpb.SymbolScope_SYMBOL_SCOPE_UNSPECIFIED,
+		Type:    indexpb.SymbolType_FILE,
+	}
+	i.project.Symbols = append(i.project.Symbols, fileSymbol)
+	i.symbolByID[fileSymbolID] = fileSymbol
+	i.symbolNameByID[fileSymbolID] = path
+
+	// Create file symbol instance covering entire file
+	fileLen := int32(len(contents))
+	file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
+		SymbolLocalId: fileSymbolID,
+		StartOffset:   0,
+		EndOffset:     fileLen,
+	})
+
+	// Track file symbol for later use
+	i.fileSymbolByObjectID[fileID] = fileSymbolID
 
 	i.project.Objects = append(i.project.Objects, file)
 	fileHash := computeHash(contents)
