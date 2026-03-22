@@ -114,9 +114,9 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 						return fmt.Errorf("failed to find file ID for %s: %w", start.Filename, err)
 					}
 				} else {
-					fileId, start, end, err = f.index.FindBuiltinDeclaration(lhsMethod.Name())
+					fileId, start, end, err = f.index.FindBuiltinInstance(lhsMethod.Name())
 					if err != nil {
-						return fmt.Errorf("failed to find builtin declaration for %s: %w", lhsMethod.Name(), err)
+						return fmt.Errorf("failed to find builtin instance for %s: %w", lhsMethod.Name(), err)
 					}
 				}
 

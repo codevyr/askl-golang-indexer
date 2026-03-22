@@ -25,26 +25,26 @@ type fileNameKey struct {
 	name     string
 }
 
-type declKey struct {
+type instanceKey struct {
 	symbolID int64
 	fileID   int64
 	start    int
 	end      int
 }
 
-type declLookupKey struct {
+type instanceLookupKey struct {
 	name       string
 	scope      SymbolScope
 	symbolType SymbolType
 }
 
-type declEntry struct {
+type instanceEntry struct {
 	symbolID   int64
 	fileID     int64
 	symbolType SymbolType
 	start      int
 	end        int
-	declID     DeclarationId
+	instanceID     SymbolInstanceId
 }
 
 type referenceLog struct {
@@ -81,7 +81,7 @@ type ProtoIndex struct {
 	nextModuleID int64
 	nextFileID   int64
 	nextSymbolID int64
-	nextDeclID   int64
+	nextInstanceID   int64
 
 	// Module tracking (for creating module symbols)
 	modulesByName map[string]int64
@@ -100,9 +100,9 @@ type ProtoIndex struct {
 	symbolNameByID     map[int64]string
 	symbolByFileAndName map[fileNameKey]int64
 
-	declIDByKey   map[declKey]DeclarationId
-	declsByFile   map[int64][]declEntry
-	declsByLookup map[declLookupKey][]DeclarationId
+	instanceIDByKey   map[instanceKey]SymbolInstanceId
+	instancesByFile   map[int64][]instanceEntry
+	instancesByLookup map[instanceLookupKey][]SymbolInstanceId
 	referencesLog    []referenceLog
 	moduleImportsLog []moduleImportLog
 }
@@ -125,7 +125,7 @@ func NewProtoIndex(options ...Option) (*ProtoIndex, error) {
 		nextModuleID:        1,
 		nextFileID:          1,
 		nextSymbolID:        1,
-		nextDeclID:          1,
+		nextInstanceID:          1,
 		modulesByName:       make(map[string]int64),
 		moduleByID:          make(map[int64]*moduleInfo),
 		fileByID:             make(map[int64]*indexpb.Object),
@@ -138,9 +138,9 @@ func NewProtoIndex(options ...Option) (*ProtoIndex, error) {
 		symbolByID:          make(map[int64]*indexpb.Symbol),
 		symbolNameByID:      make(map[int64]string),
 		symbolByFileAndName: make(map[fileNameKey]int64),
-		declIDByKey:         make(map[declKey]DeclarationId),
-		declsByFile:         make(map[int64][]declEntry),
-		declsByLookup:       make(map[declLookupKey][]DeclarationId),
+		instanceIDByKey:         make(map[instanceKey]SymbolInstanceId),
+		instancesByFile:         make(map[int64][]instanceEntry),
+		instancesByLookup:       make(map[instanceLookupKey][]SymbolInstanceId),
 		referencesLog:       []referenceLog{},
 		moduleImportsLog:    []moduleImportLog{},
 	}
@@ -557,7 +557,7 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 	return FileId(fileID), nil
 }
 
-func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, DeclarationId, error) {
+func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, SymbolInstanceId, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -597,9 +597,9 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 		i.symbolByFileAndName[fileNameKey{filePath: filePath, name: name}] = symbolID
 	}
 
-	key := declKey{symbolID: symbolID, fileID: int64(fileId), start: start.Offset, end: end.Offset}
-	if declID, ok := i.declIDByKey[key]; ok {
-		return SymbolId(symbolID), declID, nil
+	key := instanceKey{symbolID: symbolID, fileID: int64(fileId), start: start.Offset, end: end.Offset}
+	if instanceID, ok := i.instanceIDByKey[key]; ok {
+		return SymbolId(symbolID), instanceID, nil
 	}
 
 	if symbolType == 0 {
@@ -612,8 +612,8 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 		return -1, -1, fmt.Errorf("end offset out of range for %s", name)
 	}
 
-	declID := DeclarationId(i.nextDeclID)
-	i.nextDeclID++
+	instanceID := SymbolInstanceId(i.nextInstanceID)
+	i.nextInstanceID++
 
 	file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
 		SymbolLocalId: symbolID,
@@ -621,60 +621,60 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 		EndOffset:     int32(end.Offset),
 	})
 
-	entry := declEntry{
+	entry := instanceEntry{
 		symbolID:   symbolID,
 		fileID:     int64(fileId),
 		symbolType: symbolType,
 		start:      start.Offset,
 		end:        end.Offset,
-		declID:     declID,
+		instanceID:     instanceID,
 	}
-	i.declsByFile[int64(fileId)] = append(i.declsByFile[int64(fileId)], entry)
-	i.declIDByKey[key] = declID
+	i.instancesByFile[int64(fileId)] = append(i.instancesByFile[int64(fileId)], entry)
+	i.instanceIDByKey[key] = instanceID
 
-	lookupKey := declLookupKey{name: name, scope: scope, symbolType: symbolType}
-	i.declsByLookup[lookupKey] = append(i.declsByLookup[lookupKey], declID)
+	lookupKey := instanceLookupKey{name: name, scope: scope, symbolType: symbolType}
+	i.instancesByLookup[lookupKey] = append(i.instancesByLookup[lookupKey], instanceID)
 
-	return SymbolId(symbolID), declID, nil
+	return SymbolId(symbolID), instanceID, nil
 }
 
-func (i *ProtoIndex) FindDeclarationId(name string, scope SymbolScope, symbolType SymbolType) ([]DeclarationId, error) {
+func (i *ProtoIndex) FindSymbolInstanceId(name string, scope SymbolScope, symbolType SymbolType) ([]SymbolInstanceId, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	key := declLookupKey{name: name, scope: scope, symbolType: symbolType}
-	decls := i.declsByLookup[key]
-	if len(decls) == 0 {
-		return []DeclarationId{}, nil
+	key := instanceLookupKey{name: name, scope: scope, symbolType: symbolType}
+	instances := i.instancesByLookup[key]
+	if len(instances) == 0 {
+		return []SymbolInstanceId{}, nil
 	}
-	out := make([]DeclarationId, len(decls))
-	copy(out, decls)
+	out := make([]SymbolInstanceId, len(instances))
+	copy(out, instances)
 	return out, nil
 }
 
-func (i *ProtoIndex) FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, DeclarationId, error) {
+func (i *ProtoIndex) FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, SymbolInstanceId, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
 	// Symbol key is now project-scoped
 	symbolID, ok := i.symbolByKey[symbolKey{name: name, scope: scope}]
 	if !ok {
-		return SymbolId(-1), DeclarationId(-1), fmt.Errorf("symbol not found")
+		return SymbolId(-1), SymbolInstanceId(-1), fmt.Errorf("symbol not found")
 	}
 
-	decls := i.declsByFile[int64(fileId)]
-	var matches []declEntry
-	for _, decl := range decls {
-		if decl.symbolID == symbolID && decl.symbolType == symbolType {
-			matches = append(matches, decl)
+	instances := i.instancesByFile[int64(fileId)]
+	var matches []instanceEntry
+	for _, inst := range instances {
+		if inst.symbolID == symbolID && inst.symbolType == symbolType {
+			matches = append(matches, inst)
 		}
 	}
 
 	if len(matches) != 1 {
-		return SymbolId(-1), DeclarationId(-1), fmt.Errorf("expected 1 symbol, found %d", len(matches))
+		return SymbolId(-1), SymbolInstanceId(-1), fmt.Errorf("expected 1 symbol, found %d", len(matches))
 	}
 
-	return SymbolId(symbolID), matches[0].declID, nil
+	return SymbolId(symbolID), matches[0].instanceID, nil
 }
 
 func (i *ProtoIndex) FindFileId(path string) (FileId, error) {
@@ -694,10 +694,10 @@ func (i *ProtoIndex) GetAllSymbols() ([]SymbolDecl, error) {
 	defer i.mu.Unlock()
 
 	symbols := []SymbolDecl{}
-	for fileID, decls := range i.declsByFile {
+	for fileID, instances := range i.instancesByFile {
 		moduleID := i.fileModuleID[fileID]
-		for _, decl := range decls {
-			symbol := i.symbolByID[decl.symbolID]
+		for _, inst := range instances {
+			symbol := i.symbolByID[inst.symbolID]
 			if symbol == nil {
 				continue
 			}
@@ -706,26 +706,26 @@ func (i *ProtoIndex) GetAllSymbols() ([]SymbolDecl, error) {
 				FileId:     FileId(fileID),
 				Name:       symbol.Name,
 				Scope:      fromProtoScope(symbol.Scope),
-				SymbolType: decl.symbolType,
-				Start:      token.Position{Offset: decl.start},
-				End:        token.Position{Offset: decl.end},
+				SymbolType: inst.symbolType,
+				Start:      token.Position{Offset: inst.start},
+				End:        token.Position{Offset: inst.end},
 			})
 		}
 	}
 	return symbols, nil
 }
 
-func (i *ProtoIndex) FindBuiltinDeclaration(name string) (FileId, token.Position, token.Position, error) {
+func (i *ProtoIndex) FindBuiltinInstance(name string) (FileId, token.Position, token.Position, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	for fileID, decls := range i.declsByFile {
+	for fileID, instances := range i.instancesByFile {
 		filePath := i.filePathByID[fileID]
 		if !isBuiltinPath(filePath) {
 			continue
 		}
-		for _, decl := range decls {
-			symbol := i.symbolByID[decl.symbolID]
+		for _, inst := range instances {
+			symbol := i.symbolByID[inst.symbolID]
 			if symbol == nil {
 				continue
 			}
@@ -733,13 +733,13 @@ func (i *ProtoIndex) FindBuiltinDeclaration(name string) (FileId, token.Position
 				continue
 			}
 
-			start := token.Position{Filename: filePath, Offset: decl.start}
-			end := token.Position{Filename: filePath, Offset: decl.end}
+			start := token.Position{Filename: filePath, Offset: inst.start}
+			end := token.Position{Filename: filePath, Offset: inst.end}
 			return FileId(fileID), start, end, nil
 		}
 	}
 
-	return FileId(-1), token.Position{}, token.Position{}, fmt.Errorf("builtin declaration not found for %s", name)
+	return FileId(-1), token.Position{}, token.Position{}, fmt.Errorf("builtin instance not found for %s", name)
 }
 
 func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position) error {
@@ -840,7 +840,7 @@ func (i *ProtoIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 		if len(file.Refs) == 0 {
 			continue
 		}
-		decls := i.declsByFile[fileID]
+		instances := i.instancesByFile[fileID]
 
 		// Get module name for this file (for module-level refs)
 		moduleID := i.fileModuleID[fileID]
@@ -857,22 +857,22 @@ func (i *ProtoIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 			toSymbol := i.symbolByID[ref.ToSymbolLocalId]
 			isModuleImportRef := toSymbol != nil && toSymbol.Type == indexpb.SymbolType_MODULE
 
-			// Check if this ref is contained in any function declaration
-			foundContainingDecl := false
-			for _, decl := range decls {
-				if decl.start <= int(ref.FromOffsetStart) && decl.end >= int(ref.FromOffsetEnd) {
-					fromName := i.symbolNameByID[decl.symbolID]
+			// Check if this ref is contained in any symbol instance
+			foundContainingInst := false
+			for _, inst := range instances {
+				if inst.start <= int(ref.FromOffsetStart) && inst.end >= int(ref.FromOffsetEnd) {
+					fromName := i.symbolNameByID[inst.symbolID]
 					references = append(references, &ReferenceNames{
 						From: fromName,
 						To:   toName,
 					})
-					foundContainingDecl = true
+					foundContainingInst = true
 				}
 			}
 
-			// If this is a module import ref and no containing declaration found,
+			// If this is a module import ref and no containing instance found,
 			// attribute it to the module itself
-			if isModuleImportRef && !foundContainingDecl && moduleName != "" {
+			if isModuleImportRef && !foundContainingInst && moduleName != "" {
 				references = append(references, &ReferenceNames{
 					From: moduleName,
 					To:   toName,
