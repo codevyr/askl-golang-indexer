@@ -857,22 +857,32 @@ func (i *ProtoIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 			toSymbol := i.symbolByID[ref.ToSymbolLocalId]
 			isModuleImportRef := toSymbol != nil && toSymbol.Type == indexpb.SymbolType_MODULE
 
-			// Check if this ref is contained in any symbol instance
-			foundContainingInst := false
-			for _, inst := range instances {
+			// Find the innermost (smallest range) symbol instance containing this reference.
+			// This ensures that references inside nested/anonymous functions are attributed
+			// to the innermost function, not to the outer containing function.
+			var bestInst *instanceEntry
+			bestRange := math.MaxInt
+			for idx := range instances {
+				inst := &instances[idx]
 				if inst.start <= int(ref.FromOffsetStart) && inst.end >= int(ref.FromOffsetEnd) {
-					fromName := i.symbolNameByID[inst.symbolID]
-					references = append(references, &ReferenceNames{
-						From: fromName,
-						To:   toName,
-					})
-					foundContainingInst = true
+					instRange := inst.end - inst.start
+					if instRange < bestRange {
+						bestRange = instRange
+						bestInst = inst
+					}
 				}
+			}
+			if bestInst != nil {
+				fromName := i.symbolNameByID[bestInst.symbolID]
+				references = append(references, &ReferenceNames{
+					From: fromName,
+					To:   toName,
+				})
 			}
 
 			// If this is a module import ref and no containing instance found,
 			// attribute it to the module itself
-			if isModuleImportRef && !foundContainingInst && moduleName != "" {
+			if isModuleImportRef && bestInst == nil && moduleName != "" {
 				references = append(references, &ReferenceNames{
 					From: moduleName,
 					To:   toName,

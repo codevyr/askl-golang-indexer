@@ -12,12 +12,14 @@ import (
 )
 
 type FileParser struct {
-	filepath string
-	fileId   index.FileId
-	moduleId index.ModuleId
-	ast      *ast.File
-	pkg      *packages.Package
-	index    index.Index
+	filepath         string
+	fileId           index.FileId
+	moduleId         index.ModuleId
+	ast              *ast.File
+	pkg              *packages.Package
+	index            index.Index
+	anonFuncByPos    map[int]string      // FuncLit start offset -> full name
+	varToFuncLitPos  map[token.Pos]int   // var def token.Pos -> FuncLit start offset (file-level for closure capture)
 }
 
 var _ Parsable = &FileParser{}
@@ -45,12 +47,14 @@ func NewFileParser(parser *ParsingStage, pkg *packages.Package, rootPath string,
 	}
 
 	return &FileParser{
-		filepath: filepath,
-		ast:      ast,
-		pkg:      pkg,
-		index:    idx,
-		fileId:   fileId,
-		moduleId: moduleId,
+		filepath:      filepath,
+		ast:           ast,
+		pkg:           pkg,
+		index:         idx,
+		fileId:        fileId,
+		moduleId:      moduleId,
+		anonFuncByPos:   make(map[int]string),
+		varToFuncLitPos: make(map[token.Pos]int),
 	}, nil
 }
 
@@ -81,16 +85,90 @@ func (f *FileParser) addInterfaceMethods(interfaceType *ast.InterfaceType) (bool
 	return true, nil
 }
 
-// Find function calls in a given FuncDecl
-func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, instanceId index.SymbolInstanceId) (err error) {
-	if fn.Body == nil {
+// recordFuncLitVar records a mapping from a variable's definition position to a FuncLit's
+// start offset, so later Ident references to that variable resolve to the anonymous function.
+func (f *FileParser) recordFuncLitVar(ident *ast.Ident, fl *ast.FuncLit) {
+	if obj := f.pkg.TypesInfo.ObjectOf(ident); obj != nil {
+		funcLitPos := f.pkg.Fset.Position(fl.Pos())
+		f.varToFuncLitPos[obj.Pos()] = funcLitPos.Offset
+	}
+}
+
+// Find function calls and anonymous functions in a given function body
+func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStmt, parentFullName string) (err error) {
+	if body == nil {
 		return
 	}
 
-	// Traverse the function body
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+	ast.Inspect(body, func(n ast.Node) bool {
 		if err != nil {
 			return false
+		}
+
+		// Track variable assignments to FuncLit for resolving calls like inner(1)
+		switch node := n.(type) {
+		case *ast.AssignStmt:
+			for i, rhs := range node.Rhs {
+				if fl, ok := rhs.(*ast.FuncLit); ok && i < len(node.Lhs) {
+					if ident, ok := node.Lhs[i].(*ast.Ident); ok {
+						f.recordFuncLitVar(ident, fl)
+					}
+				}
+			}
+			return true
+		case *ast.ValueSpec:
+			for i, val := range node.Values {
+				if fl, ok := val.(*ast.FuncLit); ok && i < len(node.Names) {
+					f.recordFuncLitVar(node.Names[i], fl)
+				}
+			}
+			return true
+		}
+
+		// Handle anonymous function literals (nested functions)
+		if funcLit, ok := n.(*ast.FuncLit); ok {
+			err = f.funcLitParser(parser, funcLit, parentFullName)
+			if err != nil {
+				return false
+			}
+			return false // Don't descend - funcLitParser handles the body
+		}
+
+		// Handle type declarations inside function bodies (e.g., local interfaces)
+		if typeSpec, ok := n.(*ast.TypeSpec); ok {
+			return f.typeSpecParser(parser, typeSpec)
+		}
+
+		// Handle inline anonymous interfaces (e.g., type assertions like .(interface{ Method() }))
+		if interfaceType, ok := n.(*ast.InterfaceType); ok {
+			var recurse bool
+			recurse, err = f.addInterfaceMethods(interfaceType)
+			if err != nil {
+				return false
+			}
+			return recurse
+		}
+
+		// Handle references to variables holding anonymous functions (e.g., passed as callbacks).
+		// This also covers direct calls like inner(1) — the CallExpr handler skips *types.Var.
+		if ident, ok := n.(*ast.Ident); ok && len(f.varToFuncLitPos) > 0 {
+			if obj := f.pkg.TypesInfo.ObjectOf(ident); obj != nil {
+				if _, isVar := obj.(*types.Var); isVar {
+					if funcLitOffset, ok := f.varToFuncLitPos[obj.Pos()]; ok {
+						if funcName, ok := f.anonFuncByPos[funcLitOffset]; ok {
+							varPos := f.pkg.Fset.Position(obj.Pos())
+							start := f.pkg.Fset.Position(ident.Pos())
+							end := f.pkg.Fset.Position(ident.End())
+							err = f.index.AddReference(f.fileId, varPos, funcName, start, end)
+							if err != nil {
+								return false
+							}
+						} else {
+							logging.Debugf("var %s maps to FuncLit at offset %d but no anon func registered", obj.String(), funcLitOffset)
+						}
+					}
+				}
+			}
 		}
 
 		var recurse bool
@@ -108,7 +186,7 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 			case *ast.SelectorExpr:
 				ident = fun.Sel
 			case *ast.FuncLit:
-				logging.Debugf("Unimplemented: %s %s", start, end)
+				// Will be handled by top-level FuncLit case when Inspect descends
 				return true
 			case *ast.ParenExpr:
 				logging.Debug("Unimplemented")
@@ -169,10 +247,12 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 				switch obj := obj.(type) {
 				case *types.Func:
 					call = obj.Origin().FullName()
+					pos = f.pkg.Fset.Position(obj.Pos())
 				case *types.TypeName:
 					logging.Debugf("Unimplemented: %s %s %s", obj.String(), start, end)
 					return true
 				case *types.Var:
+					// Variable calls to anonymous functions are handled by the Ident handler
 					logging.Debugf("Unimplemented: %s %s %s", obj.String(), start, end)
 					return true
 				case *types.Builtin:
@@ -181,7 +261,6 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 				default:
 					logging.Panicf("Unimplemented %+T", obj)
 				}
-				pos = f.pkg.Fset.Position(obj.Pos())
 			}
 
 			if !pos.IsValid() {
@@ -201,6 +280,24 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, fn *ast.FuncDecl, 
 	})
 
 	return
+}
+
+func (f *FileParser) funcLitParser(parser *ParsingStage, fn *ast.FuncLit, parentFullName string) error {
+	start := f.pkg.Fset.Position(fn.Pos())
+	end := f.pkg.Fset.Position(fn.End())
+
+	name := fmt.Sprintf("%s:<anon%d>", parentFullName, start.Offset)
+
+	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, name, index.ScopeLocal, index.SymbolTypeFunction, start, end)
+	if err != nil {
+		return fmt.Errorf("failed to add anonymous function symbol: %w", err)
+	}
+
+	// Record the mapping for reference resolution
+	f.anonFuncByPos[start.Offset] = name
+
+	// Recursively parse the function body for call references and deeper nesting
+	return f.functionBodyParser(parser, fn.Body, name)
 }
 
 func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (bool, error) {
@@ -239,12 +336,12 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 
 	start := f.pkg.Fset.Position(fn.Pos())
 	end := f.pkg.Fset.Position(fn.End())
-	_, instanceId, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeFunction, start, end)
+	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeFunction, start, end)
 	if err != nil {
 		return false, fmt.Errorf("failed to add symbol: %s", err)
 	}
 
-	err = f.functionBodyParser(parser, fn, instanceId)
+	err = f.functionBodyParser(parser, fn.Body, fullName)
 	if err != nil {
 		return false, err
 	}
@@ -306,9 +403,18 @@ func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 		var recurse bool
 		switch n := n.(type) {
 		case *ast.FuncLit:
-			// Print the function literal
-			logging.Debugf("Found function literal at %s: %T %T", f.pkg.Fset.Position(n.Pos()), n, n.Type)
-			return true // continue traversing
+			// Process if not already handled by functionBodyParser (which handles
+			// FuncLits inside FuncDecl bodies). Top-level FuncLits (e.g., var f = func(){})
+			// are only discovered here.
+			start := f.pkg.Fset.Position(n.Pos())
+			if _, alreadyProcessed := f.anonFuncByPos[start.Offset]; !alreadyProcessed {
+				err = f.funcLitParser(parser, n, f.pkg.PkgPath)
+				if err != nil {
+					logging.Errorf("Failed to parse function literal: %v", err)
+					return false
+				}
+			}
+			return false // Don't descend - funcLitParser handles body
 		case *ast.FuncType:
 			logging.Debugf("Found function type object at %s: %T", f.pkg.Fset.Position(n.Pos()), n)
 			return true // continue traversing
