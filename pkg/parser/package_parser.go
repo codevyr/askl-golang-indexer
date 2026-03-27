@@ -92,6 +92,9 @@ func (p *PackageParser) GetId() (string, bool) {
 	return p.pkg.ID, true
 }
 
+// GetSymbolScope determines whether a symbol is exported (global) or unexported (local)
+// based on the Go visibility rules. The name parameter must be the short identifier name
+// (e.g., "Foo", "bar"), not a fully qualified name (e.g., "pkg.Foo" or "(pkg.Type).Method").
 func GetSymbolScope(name string) index.SymbolScope {
 	var first rune
 	for _, c := range name {

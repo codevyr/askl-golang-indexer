@@ -18,8 +18,11 @@ type FileParser struct {
 	ast              *ast.File
 	pkg              *packages.Package
 	index            index.Index
-	anonFuncByPos    map[int]string      // FuncLit start offset -> full name
-	varToFuncLitPos  map[token.Pos]int   // var def token.Pos -> FuncLit start offset (file-level for closure capture)
+	anonFuncByPos   map[int]string    // FuncLit start offset -> full name
+	varToFuncLitPos map[token.Pos]int // var def token.Pos -> FuncLit start offset
+	// varToFuncLitPos is file-scoped and never cleared between functions.
+	// This is safe because keys are token.Pos (unique per declaration site in the file),
+	// so entries from different functions never collide.
 }
 
 var _ Parsable = &FileParser{}
@@ -70,7 +73,10 @@ func (f *FileParser) addInterfaceMethods(interfaceType *ast.InterfaceType) (bool
 		if !ok {
 			return false, fmt.Errorf("expected to find definition %s", methodName)
 		}
-		objFunc := obj.(*types.Func)
+		objFunc, ok := obj.(*types.Func)
+		if !ok {
+			return false, fmt.Errorf("expected *types.Func for interface method %s, got %T", methodName, obj)
+		}
 		fullName := objFunc.FullName()
 		symbolScope := GetSymbolScope(methodName.Name)
 		start := f.pkg.Fset.Position(method.Pos())
@@ -136,7 +142,12 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 
 		// Handle type declarations inside function bodies (e.g., local interfaces)
 		if typeSpec, ok := n.(*ast.TypeSpec); ok {
-			return f.typeSpecParser(parser, typeSpec)
+			var recurse bool
+			recurse, err = f.typeSpecParser(parser, typeSpec, parentFullName)
+			if err != nil {
+				return false
+			}
+			return recurse
 		}
 
 		// Handle inline anonymous interfaces (e.g., type assertions like .(interface{ Method() }))
@@ -305,7 +316,10 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 	var fullName string
 	obj, ok := f.pkg.TypesInfo.Defs[fn.Name]
 	if ok {
-		objFunc := obj.(*types.Func)
+		objFunc, ok := obj.(*types.Func)
+		if !ok {
+			return false, fmt.Errorf("expected *types.Func for function %s, got %T", fn.Name.Name, obj)
+		}
 		fullName = objFunc.FullName()
 	} else {
 		// For compiler-provided packages like "unsafe", TypesInfo.Defs is empty
@@ -341,53 +355,286 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 		return false, fmt.Errorf("failed to add symbol: %s", err)
 	}
 
+	// Record deferred TYPE->FUNCTION reference for methods with receivers
+	if fn.Recv != nil && len(fn.Recv.List) > 0 {
+		recvType := fn.Recv.List[0].Type
+		// Unwrap *ast.StarExpr, *ast.IndexExpr, *ast.IndexListExpr
+		for {
+			switch t := recvType.(type) {
+			case *ast.StarExpr:
+				recvType = t.X
+				continue
+			case *ast.IndexExpr:
+				recvType = t.X
+				continue
+			case *ast.IndexListExpr:
+				recvType = t.X
+				continue
+			}
+			break
+		}
+		var recvIdent *ast.Ident
+		switch t := recvType.(type) {
+		case *ast.Ident:
+			recvIdent = t
+		case *ast.SelectorExpr:
+			recvIdent = t.Sel
+		}
+		if recvIdent != nil {
+			if recvObj, ok := f.pkg.TypesInfo.Uses[recvIdent]; ok {
+				if tn, ok := recvObj.(*types.TypeName); ok {
+					methodPos := f.pkg.Fset.Position(fn.Name.Pos())
+					parser.parser.addReceiverRef(methodReceiverRef{
+						typeName:       tn,
+						methodFullName: fullName,
+						methodPos:      methodPos,
+						pkg:            f.pkg,
+					})
+				}
+			}
+		}
+	}
+
+	// Process anonymous interfaces in function signature (params, results, receiver)
+	// since we return false to prevent the outer inspector from descending.
+	if fn.Type != nil {
+		var inspectErr error
+		ast.Inspect(fn.Type, func(n ast.Node) bool {
+			if inspectErr != nil {
+				return false
+			}
+			if interfaceType, ok := n.(*ast.InterfaceType); ok {
+				_, inspectErr = f.addInterfaceMethods(interfaceType)
+				if inspectErr != nil {
+					return false
+				}
+				return true
+			}
+			return true
+		})
+		if inspectErr != nil {
+			return false, inspectErr
+		}
+	}
+
 	err = f.functionBodyParser(parser, fn.Body, fullName)
 	if err != nil {
 		return false, err
 	}
-	return true, nil
+	return false, nil // Don't let outer inspector descend — functionBodyParser handles the body
 }
 
-func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec) bool {
+// addTypeRefs adds type references, deferring any whose target file isn't indexed yet.
+func (f *FileParser) addTypeRefs(parser *ParsingStage, refs []typeRef) {
+	for _, ref := range refs {
+		useStart := f.pkg.Fset.Position(ref.usePos)
+		useEnd := f.pkg.Fset.Position(ref.useEnd)
+
+		defPos := f.pkg.Fset.Position(ref.typeName.Pos())
+		if _, findErr := f.index.FindFileId(defPos.Filename); findErr != nil {
+			// Target file not indexed yet — defer for post-stage-1 resolution
+			parser.parser.addDeferredTypeRef(deferredTypeRef{
+				fromFileId: f.fileId,
+				typeName:   ref.typeName,
+				useStart:   useStart,
+				useEnd:     useEnd,
+				pkg:        f.pkg,
+			})
+			continue
+		}
+		fullName := typeFullName(ref.typeName)
+		if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd); addErr != nil {
+			logging.Errorf("Failed to add type reference: %v", addErr)
+		}
+	}
+}
+
+// addBuiltinTypeRefs walks type expressions and emits references to builtin
+// types (int, string, bool, etc.) that are used in the expressions. This is
+// called explicitly for struct field types so that structs using builtins
+// have outgoing references to those types.
+func (f *FileParser) addBuiltinTypeRefs(parser *ParsingStage, exprs ...ast.Expr) {
+	seen := make(map[string]struct{})
+
+	var walk func(ast.Expr)
+	walk = func(e ast.Expr) {
+		if e == nil {
+			return
+		}
+		switch n := e.(type) {
+		case *ast.Ident:
+			obj, ok := f.pkg.TypesInfo.Uses[n]
+			if !ok {
+				return
+			}
+			tn, ok := obj.(*types.TypeName)
+			if !ok || tn.Pkg() != nil {
+				return // not a builtin type
+			}
+			if _, dup := seen[tn.Name()]; dup {
+				return
+			}
+			seen[tn.Name()] = struct{}{}
+
+			fullName := "builtin." + tn.Name()
+			_, defPos := parser.parser.builtin.Lookup(tn.Name())
+			if !defPos.IsValid() {
+				return
+			}
+			useStart := f.pkg.Fset.Position(n.Pos())
+			useEnd := f.pkg.Fset.Position(n.End())
+			if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd); addErr != nil {
+				logging.Errorf("Failed to add builtin type reference: %v", addErr)
+			}
+		case *ast.StarExpr:
+			walk(n.X)
+		case *ast.ArrayType:
+			walk(n.Elt)
+		case *ast.MapType:
+			walk(n.Key)
+			walk(n.Value)
+		case *ast.ChanType:
+			walk(n.Value)
+		case *ast.FuncType:
+			if n.Params != nil {
+				for _, field := range n.Params.List {
+					walk(field.Type)
+				}
+			}
+			if n.Results != nil {
+				for _, field := range n.Results.List {
+					walk(field.Type)
+				}
+			}
+		case *ast.StructType:
+			if n.Fields != nil {
+				for _, field := range n.Fields.List {
+					walk(field.Type)
+				}
+			}
+		}
+	}
+
+	for _, expr := range exprs {
+		walk(expr)
+	}
+}
+
+func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, parentFullName string) (bool, error) {
 	if ts.Name == nil {
 		logging.Warn("Skipping type spec with no name")
-		return false
+		return false, nil
 	}
-	name := ts.Name.Name
 
-	switch ts := ts.Type.(type) {
+	// 3a. Create TYPE symbol
+	var fullName string
+	obj, ok := f.pkg.TypesInfo.Defs[ts.Name]
+	if ok && obj != nil {
+		tn, ok := obj.(*types.TypeName)
+		if !ok {
+			return false, fmt.Errorf("expected *types.TypeName for type %s, got %T", ts.Name.Name, obj)
+		}
+		// Package-level vs local type
+		if tn.Parent() == tn.Pkg().Scope() {
+			fullName = typeFullName(tn)
+		} else {
+			fullName = parentFullName + "." + tn.Name()
+		}
+	} else {
+		// Fallback for compiler-provided packages (builtin/unsafe)
+		if f.pkg.Types != nil {
+			scopeObj := f.pkg.Types.Scope().Lookup(ts.Name.Name)
+			if scopeObj != nil {
+				if tn, ok := scopeObj.(*types.TypeName); ok {
+					fullName = typeFullName(tn)
+				} else {
+					fullName = f.pkg.PkgPath + "." + ts.Name.Name
+				}
+			} else {
+				logging.Debugf("Type %s not found in package scope %s, skipping", ts.Name.Name, f.pkg.PkgPath)
+				return true, nil
+			}
+		} else {
+			logging.Debugf("No type info for type %s, skipping", ts.Name.Name)
+			return true, nil
+		}
+	}
+
+	symbolScope := GetSymbolScope(ts.Name.Name)
+	start := f.pkg.Fset.Position(ts.Pos())
+	end := f.pkg.Fset.Position(ts.End())
+
+	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeType, start, end)
+	if err != nil {
+		return false, fmt.Errorf("failed to add TYPE symbol %s: %w", fullName, err)
+	}
+
+	// 3d. Walk TypeParams for generic constraint references
+	if ts.TypeParams != nil {
+		constraintExprs := make([]ast.Expr, 0, len(ts.TypeParams.List))
+		for _, field := range ts.TypeParams.List {
+			constraintExprs = append(constraintExprs, field.Type)
+		}
+		refs := extractNamedTypes(f.pkg, constraintExprs...)
+		f.addTypeRefs(parser, refs)
+	}
+
+	switch iface := ts.Type.(type) {
 	case *ast.InterfaceType:
-		if ts.Methods == nil {
-			logging.Debugf("Skipping empty interface %s", name)
-			return false
+		// 3b. For interfaces — add methods and create TYPE->FUNCTION refs
+		if iface.Methods != nil {
+			var embeddedExprs []ast.Expr
+			typeNameStart := f.pkg.Fset.Position(ts.Name.Pos())
+			typeNameEnd := f.pkg.Fset.Position(ts.Name.End())
+			for _, method := range iface.Methods.List {
+				if len(method.Names) == 0 {
+					// Embedded type — collect for batched TYPE->TYPE refs
+					embeddedExprs = append(embeddedExprs, method.Type)
+					continue
+				}
+				methodName := method.Names[0]
+				methodObj, ok := f.pkg.TypesInfo.Defs[methodName]
+				if !ok {
+					return false, fmt.Errorf("expected to find definition %s", methodName)
+				}
+				objFunc, ok := methodObj.(*types.Func)
+				if !ok {
+					return false, fmt.Errorf("expected *types.Func for interface method %s, got %T", methodName, methodObj)
+				}
+				methodFullName := objFunc.FullName()
+				methodScope := GetSymbolScope(methodName.Name)
+				methodStart := f.pkg.Fset.Position(method.Pos())
+				methodEnd := f.pkg.Fset.Position(method.End())
+
+				_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, methodFullName, methodScope, index.SymbolTypeFunction, methodStart, methodEnd)
+				if err != nil {
+					return false, fmt.Errorf("failed to add interface method symbol %s: %w", methodFullName, err)
+				}
+
+				// TYPE->FUNCTION reference: from_offset at the type name position
+				if addErr := f.index.AddReference(f.fileId, methodStart, methodFullName, typeNameStart, typeNameEnd); addErr != nil {
+					logging.Errorf("Failed to add TYPE->FUNCTION reference: %v", addErr)
+				}
+			}
+			if len(embeddedExprs) > 0 {
+				f.addTypeRefs(parser, extractNamedTypes(f.pkg, embeddedExprs...))
+			}
 		}
+		return false, nil // Don't descend — prevents double addInterfaceMethods
 
-		for _, method := range ts.Methods.List {
-			if len(method.Names) == 0 {
-				logging.Warnf("Skipping interface method with no name in %s", name)
-				continue
-			}
-			methodName := method.Names[0]
-			obj, ok := f.pkg.TypesInfo.Defs[methodName]
-			if !ok {
-				logging.Panicf("Expected to find definition %s", methodName)
-			}
-			objFunc := obj.(*types.Func)
-			fullName := objFunc.FullName()
-			symbolScope := GetSymbolScope(methodName.Name)
-			start := f.pkg.Fset.Position(method.Pos())
-			end := f.pkg.Fset.Position(method.End())
-
-			_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeFunction, start, end)
-			if err != nil {
-				logging.Fatalf("Failed to add symbol: %s", err)
-			}
-
-		}
-
-		return true // We do not handle interfaces yet
 	default:
-		return true
+		// 3c. For non-interfaces — walk type expression
+		refs := extractNamedTypes(f.pkg, ts.Type)
+		f.addTypeRefs(parser, refs)
+		// Also emit references to builtin types used in struct fields
+		if structType, ok := ts.Type.(*ast.StructType); ok && structType.Fields != nil {
+			fieldExprs := make([]ast.Expr, 0, len(structType.Fields.List))
+			for _, field := range structType.Fields.List {
+				fieldExprs = append(fieldExprs, field.Type)
+			}
+			f.addBuiltinTypeRefs(parser, fieldExprs...)
+		}
+		return true, nil // Let inspector descend for anonymous interfaces in struct fields
 	}
 }
 
@@ -433,7 +680,13 @@ func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 			}
 			return recurse
 		case *ast.TypeSpec:
-			return f.typeSpecParser(parser, n)
+			var recurse bool
+			recurse, err = f.typeSpecParser(parser, n, f.pkg.PkgPath)
+			if err != nil {
+				logging.Errorf("Failed to parse type spec %s: %v", n.Name.Name, err)
+				return false
+			}
+			return recurse
 		default:
 			return true // continue traversing
 		}
