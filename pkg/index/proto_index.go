@@ -423,6 +423,8 @@ func toProtoType(symbolType SymbolType) indexpb.SymbolType {
 		return indexpb.SymbolType_MODULE
 	case SymbolTypeDirectory:
 		return indexpb.SymbolType_DIRECTORY
+	case SymbolTypeType:
+		return indexpb.SymbolType_TYPE
 	default:
 		return indexpb.SymbolType_SYMBOL_TYPE_UNSPECIFIED
 	}
@@ -743,7 +745,10 @@ func (i *ProtoIndex) FindBuiltinInstance(name string) (FileId, token.Position, t
 }
 
 func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position) error {
-	if start.Filename == "" && start.Offset == 0 && start.Line == 0 && start.Column == 0 {
+	// Reject start positions that are completely empty (zero-value struct).
+	// Positions with a filename but Line=0 are allowed — this occurs for
+	// compiler-provided packages like builtin/unsafe.
+	if !start.IsValid() && start.Filename == "" {
 		return fmt.Errorf("invalid reference start position: from=%d to=%s '%s' %s-%s %s",
 			from,
 			to, toName, start, end, to.Filename)

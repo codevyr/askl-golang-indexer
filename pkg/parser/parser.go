@@ -5,11 +5,32 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"sync"
 
 	"github.com/planetA/askl-golang-indexer/pkg/index"
 	"github.com/planetA/askl-golang-indexer/pkg/logging"
 	"golang.org/x/tools/go/packages"
 )
+
+// methodReceiverRef records a deferred TYPE->FUNCTION reference for methods
+// with receivers. Processing is deferred because during concurrent stage 1
+// parsing, the type's file may not yet be indexed.
+type methodReceiverRef struct {
+	typeName       *types.TypeName
+	methodFullName string
+	methodPos      token.Position
+	pkg            *packages.Package
+}
+
+// deferredTypeRef records a deferred TYPE->TYPE reference when the target
+// type's file is not yet indexed during concurrent stage 1 parsing.
+type deferredTypeRef struct {
+	fromFileId index.FileId
+	typeName   *types.TypeName
+	useStart   token.Position
+	useEnd     token.Position
+	pkg        *packages.Package
+}
 
 type Parser struct {
 	builtin builtinPkgs
@@ -25,7 +46,19 @@ type Parser struct {
 
 	parseTypes      bool
 	continueOnError bool
+
+	// Deferred method receiver references (TYPE->FUNCTION).
+	// Collected during stage 1, resolved between stage 1 and stage 2.
+	receiverRefsMu sync.Mutex
+	receiverRefs   []methodReceiverRef
+
+	// Deferred type-to-type references.
+	// Collected during stage 1 when target file is not yet indexed.
+	typeRefsMu sync.Mutex
+	typeRefs   []deferredTypeRef
 }
+
+const stageNamePackageParser = "PackageParser"
 
 type option func(*Parser)
 
@@ -66,7 +99,7 @@ func NewParserWithPaths(packagePaths []string, index index.Index, options ...opt
 	}
 
 	p.stages = append(p.stages,
-		NewParsingStage(p, "PackageParser", NewPackageParser),
+		NewParsingStage(p, stageNamePackageParser, NewPackageParser),
 		NewParsingStage(p, "AssignmentParser", NewAssignmentStage),
 	)
 
@@ -126,6 +159,14 @@ func (p *Parser) AddPackages() error {
 		if err != nil {
 			return fmt.Errorf("failed to wait for stage %s: %w", stage.StageName, err)
 		}
+
+		// After PackageParser (stage 1), resolve deferred refs (receivers + type-to-type)
+		if stage.StageName == stageNamePackageParser {
+			if err := p.resolveDeferredRefs(); err != nil {
+				return fmt.Errorf("failed to resolve deferred refs: %w", err)
+			}
+		}
+
 		logging.Infof("Finished stage: %s", stage.StageName)
 	}
 
@@ -153,6 +194,71 @@ func uniquePackages(pkgs []*packages.Package) []*packages.Package {
 		out = append(out, pkg)
 	}
 	return out
+}
+
+// typeFullName returns the canonical fully-qualified name for a named type.
+func typeFullName(tn *types.TypeName) string {
+	return tn.Pkg().Path() + "." + tn.Name()
+}
+
+// addReceiverRef records a deferred method receiver reference for post-stage-1 processing.
+func (p *Parser) addReceiverRef(ref methodReceiverRef) {
+	p.receiverRefsMu.Lock()
+	defer p.receiverRefsMu.Unlock()
+	p.receiverRefs = append(p.receiverRefs, ref)
+}
+
+// addDeferredTypeRef records a deferred type-to-type reference for post-stage-1 processing.
+func (p *Parser) addDeferredTypeRef(ref deferredTypeRef) {
+	p.typeRefsMu.Lock()
+	defer p.typeRefsMu.Unlock()
+	p.typeRefs = append(p.typeRefs, ref)
+}
+
+// resolveDeferredRefs processes deferred references collected during concurrent
+// stage 1 parsing: TYPE->FUNCTION (method receivers) and TYPE->TYPE (cross-file).
+// Called after stage 1 completes, when all files are indexed.
+func (p *Parser) resolveDeferredRefs() error {
+	p.receiverRefsMu.Lock()
+	refs := p.receiverRefs
+	p.receiverRefs = nil
+	p.receiverRefsMu.Unlock()
+
+	for _, ref := range refs {
+		typeDefPos := ref.pkg.Fset.Position(ref.typeName.Pos())
+		typeFileId, err := p.index.FindFileId(typeDefPos.Filename)
+		if err != nil {
+			logging.Debugf("Skipping receiver ref for %s: type file not indexed: %v", ref.methodFullName, err)
+			continue
+		}
+		typeFullName := typeFullName(ref.typeName)
+		// Reference from TYPE to FUNCTION, placed at the type name position
+		typeNameEnd := ref.pkg.Fset.Position(ref.typeName.Pos() + token.Pos(len(ref.typeName.Name())))
+		err = p.index.AddReference(typeFileId, ref.methodPos, ref.methodFullName, typeDefPos, typeNameEnd)
+		if err != nil {
+			logging.Errorf("Failed to add receiver ref %s -> %s: %v", typeFullName, ref.methodFullName, err)
+		}
+	}
+
+	// Resolve deferred type-to-type references
+	p.typeRefsMu.Lock()
+	typeRefs := p.typeRefs
+	p.typeRefs = nil
+	p.typeRefsMu.Unlock()
+
+	for _, ref := range typeRefs {
+		defPos := ref.pkg.Fset.Position(ref.typeName.Pos())
+		if _, err := p.index.FindFileId(defPos.Filename); err != nil {
+			logging.Debugf("Skipping deferred type ref to %s: file not indexed: %v", ref.typeName.Name(), err)
+			continue
+		}
+		fullName := typeFullName(ref.typeName)
+		if err := p.index.AddReference(ref.fromFileId, defPos, fullName, ref.useStart, ref.useEnd); err != nil {
+			logging.Errorf("Failed to add deferred type ref -> %s: %v", fullName, err)
+		}
+	}
+
+	return nil
 }
 
 func (p *Parser) Close() {

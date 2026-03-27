@@ -45,7 +45,11 @@ func (s *ParsingStage) loop() {
 	for item := range s.channel {
 		err := s.doParse(item)
 		if err != nil {
-			logging.Fatalf("failed to parse package: %v", err)
+			// Feed the error through the err channel so Wait() can collect it,
+			// rather than crashing the process with Fatalf.
+			// The error channel triggers wg.Done() in Wait(), balancing the
+			// wg.Add(1) from Parse() since doParse didn't launch a goroutine.
+			s.err <- fmt.Errorf("failed to parse package: %w", err)
 		}
 	}
 }
