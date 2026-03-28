@@ -72,7 +72,7 @@ type moduleInfo struct {
 }
 
 type ProtoIndex struct {
-	mu sync.Mutex
+	mu sync.RWMutex
 
 	projectName string
 	rootPath    string
@@ -643,8 +643,8 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 }
 
 func (i *ProtoIndex) FindSymbolInstanceId(name string, scope SymbolScope, symbolType SymbolType) ([]SymbolInstanceId, error) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
+	i.mu.RLock()
+	defer i.mu.RUnlock()
 
 	key := instanceLookupKey{name: name, scope: scope, symbolType: symbolType}
 	instances := i.instancesByLookup[key]
@@ -657,8 +657,8 @@ func (i *ProtoIndex) FindSymbolInstanceId(name string, scope SymbolScope, symbol
 }
 
 func (i *ProtoIndex) FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, SymbolInstanceId, error) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
+	i.mu.RLock()
+	defer i.mu.RUnlock()
 
 	// Symbol key is now project-scoped
 	symbolID, ok := i.symbolByKey[symbolKey{name: name, scope: scope}]
@@ -682,8 +682,8 @@ func (i *ProtoIndex) FindSymbolId(moduleId ModuleId, fileId FileId, name string,
 }
 
 func (i *ProtoIndex) FindFileId(path string) (FileId, error) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
+	i.mu.RLock()
+	defer i.mu.RUnlock()
 
 	fileID, ok := i.fileIDByPath[path]
 	if !ok {
@@ -694,8 +694,8 @@ func (i *ProtoIndex) FindFileId(path string) (FileId, error) {
 }
 
 func (i *ProtoIndex) GetAllSymbols() ([]SymbolDecl, error) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
+	i.mu.RLock()
+	defer i.mu.RUnlock()
 
 	symbols := []SymbolDecl{}
 	for fileID, instances := range i.instancesByFile {
@@ -720,8 +720,8 @@ func (i *ProtoIndex) GetAllSymbols() ([]SymbolDecl, error) {
 }
 
 func (i *ProtoIndex) FindBuiltinInstance(name string) (FileId, token.Position, token.Position, error) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
+	i.mu.RLock()
+	defer i.mu.RUnlock()
 
 	for fileID, instances := range i.instancesByFile {
 		filePath := i.filePathByID[fileID]
