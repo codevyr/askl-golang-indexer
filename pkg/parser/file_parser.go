@@ -218,22 +218,22 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 				// Will be handled by top-level FuncLit case when Inspect descends
 				return true
 			case *ast.ParenExpr:
-				logging.Debug("Unimplemented")
+				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
 				return true
 			case *ast.CallExpr:
-				logging.Debug("Unimplemented")
+				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
 				return true
 			case *ast.TypeAssertExpr:
-				logging.Debug("Unimplemented")
+				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
 				return true
 			case *ast.IndexExpr:
-				logging.Debug("Unimplemented")
+				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
 				return true
 			case *ast.IndexListExpr:
-				logging.Debug("Unimplemented")
+				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
 				return true
 			case *ast.ChanType:
-				logging.Debug("Unimplemented")
+				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
 				return true
 			case *ast.InterfaceType:
 				recurse, err = f.addInterfaceMethods(fun)
@@ -243,7 +243,7 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 				}
 				return recurse
 			case *ast.MapType:
-				logging.Debug("Unimplemented")
+				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
 				return true
 			case *ast.ArrayType:
 				// We do not care about array initialization
