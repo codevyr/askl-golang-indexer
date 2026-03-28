@@ -79,6 +79,7 @@ const (
 	SymbolType_MODULE                  SymbolType = 3
 	SymbolType_DIRECTORY               SymbolType = 4
 	SymbolType_TYPE                    SymbolType = 5
+	SymbolType_DATA                    SymbolType = 6
 )
 
 // Enum value maps for SymbolType.
@@ -90,6 +91,7 @@ var (
 		3: "MODULE",
 		4: "DIRECTORY",
 		5: "TYPE",
+		6: "DATA",
 	}
 	SymbolType_value = map[string]int32{
 		"SYMBOL_TYPE_UNSPECIFIED": 0,
@@ -98,6 +100,7 @@ var (
 		"MODULE":                  3,
 		"DIRECTORY":               4,
 		"TYPE":                    5,
+		"DATA":                    6,
 	}
 )
 
@@ -514,7 +517,7 @@ const file_proto_index_proto_rawDesc = "" +
 	"\x18SYMBOL_SCOPE_UNSPECIFIED\x10\x00\x12\t\n" +
 	"\x05LOCAL\x10\x01\x12\n" +
 	"\n" +
-	"\x06GLOBAL\x10\x02*f\n" +
+	"\x06GLOBAL\x10\x02*p\n" +
 	"\n" +
 	"SymbolType\x12\x1b\n" +
 	"\x17SYMBOL_TYPE_UNSPECIFIED\x10\x00\x12\f\n" +
@@ -523,7 +526,8 @@ const file_proto_index_proto_rawDesc = "" +
 	"\n" +
 	"\x06MODULE\x10\x03\x12\r\n" +
 	"\tDIRECTORY\x10\x04\x12\b\n" +
-	"\x04TYPE\x10\x05B<Z:github.com/planetA/askl-golang-indexer/pkg/indexpb;indexpbb\x06proto3"
+	"\x04TYPE\x10\x05\x12\b\n" +
+	"\x04DATA\x10\x06B<Z:github.com/planetA/askl-golang-indexer/pkg/indexpb;indexpbb\x06proto3"
 
 var (
 	file_proto_index_proto_rawDescOnce sync.Once

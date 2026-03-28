@@ -160,23 +160,41 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 			return recurse
 		}
 
-		// Handle references to variables holding anonymous functions (e.g., passed as callbacks).
-		// This also covers direct calls like inner(1) — the CallExpr handler skips *types.Var.
-		if ident, ok := n.(*ast.Ident); ok && len(f.varToFuncLitPos) > 0 {
+		// Handle identifier references to package-level variables, constants, and
+		// variables holding anonymous functions (FuncLit vars).  The CallExpr
+		// handler below skips *types.Var, so all var/const ident refs are resolved here.
+		if ident, ok := n.(*ast.Ident); ok {
 			if obj := f.pkg.TypesInfo.ObjectOf(ident); obj != nil {
-				if _, isVar := obj.(*types.Var); isVar {
-					if funcLitOffset, ok := f.varToFuncLitPos[obj.Pos()]; ok {
-						if funcName, ok := f.anonFuncByPos[funcLitOffset]; ok {
-							varPos := f.pkg.Fset.Position(obj.Pos())
-							start := f.pkg.Fset.Position(ident.Pos())
-							end := f.pkg.Fset.Position(ident.End())
-							err = f.index.AddReference(f.fileId, varPos, funcName, start, end)
-							if err != nil {
-								return false
+				if varObj, isVar := obj.(*types.Var); isVar {
+					// Check if this var holds a FuncLit (anonymous function)
+					handled := false
+					if len(f.varToFuncLitPos) > 0 {
+						if funcLitOffset, ok := f.varToFuncLitPos[obj.Pos()]; ok {
+							handled = true
+							if funcName, ok := f.anonFuncByPos[funcLitOffset]; ok {
+								varPos := f.pkg.Fset.Position(obj.Pos())
+								start := f.pkg.Fset.Position(ident.Pos())
+								end := f.pkg.Fset.Position(ident.End())
+								err = f.index.AddReference(f.fileId, varPos, funcName, start, end)
+								if err != nil {
+									return false
+								}
+							} else {
+								logging.Debugf("var %s maps to FuncLit at offset %d but no anon func registered", obj.String(), funcLitOffset)
 							}
-						} else {
-							logging.Debugf("var %s maps to FuncLit at offset %d but no anon func registered", obj.String(), funcLitOffset)
 						}
+					}
+					// If not a FuncLit var, check for package-level variable reference
+					if !handled && !varObj.IsField() {
+						err = f.addPackageLevelDataRef(obj, ident)
+						if err != nil {
+							return false
+						}
+					}
+				} else if _, isConst := obj.(*types.Const); isConst {
+					err = f.addPackageLevelDataRef(obj, ident)
+					if err != nil {
+						return false
 					}
 				}
 			}
@@ -638,6 +656,71 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, pare
 	}
 }
 
+// isPackageLevelValue reports whether obj is a package-level variable or
+// constant (i.e. its parent scope is the package scope).
+func isPackageLevelValue(obj types.Object, pkgScope *types.Scope) bool {
+	switch obj.(type) {
+	case *types.Var, *types.Const:
+		return obj.Parent() == pkgScope
+	}
+	return false
+}
+
+// addPackageLevelDataRef emits a reference from the current file to a
+// package-level variable or constant identified by obj, at the use-site ident.
+func (f *FileParser) addPackageLevelDataRef(obj types.Object, ident *ast.Ident) error {
+	if obj.Pkg() == nil || obj.Parent() == nil || obj.Parent() != obj.Pkg().Scope() {
+		return nil
+	}
+	fullName := obj.Pkg().Path() + "." + obj.Name()
+	defPos := f.pkg.Fset.Position(obj.Pos())
+	useStart := f.pkg.Fset.Position(ident.Pos())
+	useEnd := f.pkg.Fset.Position(ident.End())
+	return f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd)
+}
+
+// valueDeclParser extracts package-level variable or constant declarations as
+// DATA symbols.  It handles both token.VAR and token.CONST GenDecls.
+func (f *FileParser) valueDeclParser(parser *ParsingStage, gd *ast.GenDecl) error {
+	pkgScope := f.pkg.Types.Scope()
+	for _, spec := range gd.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		hasPackageLevelValue := false
+		for _, name := range vs.Names {
+			if name.Name == "_" {
+				continue // skip blank identifier
+			}
+			obj, ok := f.pkg.TypesInfo.Defs[name]
+			if !ok || obj == nil {
+				continue
+			}
+			if !isPackageLevelValue(obj, pkgScope) {
+				continue
+			}
+			fullName := f.pkg.PkgPath + "." + obj.Name()
+			symbolScope := GetSymbolScope(name.Name)
+			start := f.pkg.Fset.Position(vs.Pos())
+			end := f.pkg.Fset.Position(vs.End())
+			_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeData, start, end)
+			if err != nil {
+				return fmt.Errorf("failed to add DATA symbol %s: %w", fullName, err)
+			}
+			hasPackageLevelValue = true
+		}
+		// If this ValueSpec has an explicit type annotation and at least one
+		// package-level value was added, emit DATA→TYPE references once per spec.
+		if hasPackageLevelValue && vs.Type != nil {
+			refs := extractNamedTypes(f.pkg, vs.Type)
+			f.addTypeRefs(parser, refs)
+			f.addBuiltinTypeRefs(parser, vs.Type)
+		}
+	}
+	return nil
+}
+
 func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 	// Process imports to create module-to-module references
 	f.parseImports()
@@ -679,6 +762,15 @@ func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 				return false
 			}
 			return recurse
+		case *ast.GenDecl:
+			if n.Tok == token.VAR || n.Tok == token.CONST {
+				err = f.valueDeclParser(parser, n)
+				if err != nil {
+					logging.Errorf("Failed to parse %s declaration: %v", n.Tok, err)
+					return false
+				}
+			}
+			return true // Descend to discover FuncLit in var initializers, TypeSpec, etc.
 		case *ast.TypeSpec:
 			var recurse bool
 			recurse, err = f.typeSpecParser(parser, n, f.pkg.PkgPath)
