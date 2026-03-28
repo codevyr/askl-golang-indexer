@@ -74,6 +74,8 @@ func (s SymbolType) String() string {
 		return "directory"
 	case SymbolTypeType:
 		return "type"
+	case SymbolTypeData:
+		return "data"
 	default:
 		return "unknown"
 	}
@@ -85,6 +87,7 @@ const (
 	SymbolTypeModule
 	SymbolTypeDirectory
 	SymbolTypeType
+	SymbolTypeData
 )
 
 type SymbolId int

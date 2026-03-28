@@ -425,6 +425,8 @@ func toProtoType(symbolType SymbolType) indexpb.SymbolType {
 		return indexpb.SymbolType_DIRECTORY
 	case SymbolTypeType:
 		return indexpb.SymbolType_TYPE
+	case SymbolTypeData:
+		return indexpb.SymbolType_DATA
 	default:
 		return indexpb.SymbolType_SYMBOL_TYPE_UNSPECIFIED
 	}

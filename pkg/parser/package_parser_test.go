@@ -64,6 +64,11 @@ var builtinSymbols = []*index.SymbolDecl{
 	index.NewSymbol(1, 1, "builtin.FloatType", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 	index.NewSymbol(1, 1, "builtin.ComplexType", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 	index.NewSymbol(1, 1, "builtin.error", index.ScopeLocal, index.SymbolTypeType, nil, nil),
+	// builtin DATA symbols
+	index.NewSymbol(1, 1, "builtin.true", index.ScopeLocal, index.SymbolTypeData, nil, nil),
+	index.NewSymbol(1, 1, "builtin.false", index.ScopeLocal, index.SymbolTypeData, nil, nil),
+	index.NewSymbol(1, 1, "builtin.iota", index.ScopeLocal, index.SymbolTypeData, nil, nil),
+	index.NewSymbol(1, 1, "builtin.nil", index.ScopeLocal, index.SymbolTypeData, nil, nil),
 	// unsafe package functions (manually parsed from compiler-provided package)
 	index.NewSymbol(2, 2, "unsafe.Sizeof", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 	index.NewSymbol(2, 2, "unsafe.Offsetof", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
@@ -119,6 +124,8 @@ var builtinReferences = []*index.ReferenceNames{
 	index.NewReferenceNames("builtin.IntegerType", "builtin.int"),
 	index.NewReferenceNames("builtin.FloatType", "builtin.float32"),
 	index.NewReferenceNames("builtin.ComplexType", "builtin.complex64"),
+	// DATA->TYPE: nil has type Type
+	index.NewReferenceNames("builtin.nil", "builtin.Type"),
 }
 
 func sortedSymbols(symbols []index.SymbolDecl) []*index.SymbolDecl {
@@ -657,6 +664,8 @@ var _ = Describe("PackageParser", func() {
 				index.NewSymbol(3, 3, "assign_interface.Types", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 				index.NewSymbol(3, 3, "assign_interface.UnmarshalInput", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 				index.NewSymbol(3, 3, "assign_interface.UnmarshalInput2", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
+				// DATA symbols
+				index.NewSymbol(3, 3, "assign_interface.GlobalTypes", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
 			),
 			append(
 				builtinReferences,
@@ -667,6 +676,10 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("assign_interface.UnmarshalInput", "builtin.int"),
 				// STRUCT->BUILTIN: UnmarshalInput2 has field Depth int
 				index.NewReferenceNames("assign_interface.UnmarshalInput2", "builtin.int"),
+				// DATA->TYPE: GlobalTypes has type *Types
+				index.NewReferenceNames("assign_interface.GlobalTypes", "assign_interface.Types"),
+				// FUNC->DATA: MockFunction uses GlobalTypes
+				index.NewReferenceNames("assign_interface.MockFunction", "assign_interface.GlobalTypes"),
 			),
 		),
 		Entry("assign a func to any", "assign_func",
@@ -805,6 +818,8 @@ var _ = Describe("PackageParser", func() {
 				// TYPE symbols
 				index.NewSymbol(3, 3, "call_expr_parser.Writer", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 				index.NewSymbol(3, 3, "call_expr_parser.File", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
+				// DATA symbols
+				index.NewSymbol(3, 3, "call_expr_parser.Stderr", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
 			),
 			append(
 				builtinReferences,
@@ -812,6 +827,8 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("call_expr_parser.Fprintln", "call_expr_parser.Writer).Write"),
 				index.NewReferenceNames("call_expr_parser.CallInterface", "builtin.print"),
 				index.NewReferenceNames("call_expr_parser.CallInterface", "call_expr_parser.Fprintln"),
+				// FUNC->DATA: CallInterface uses Stderr
+				index.NewReferenceNames("call_expr_parser.CallInterface", "call_expr_parser.Stderr"),
 				// TYPE->FUNCTION: interface method
 				index.NewReferenceNames("call_expr_parser.Writer", "call_expr_parser.Writer).Write"),
 				// TYPE->FUNCTION: receiver method
@@ -912,6 +929,8 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "test/src/nested_func_pkg_level:<anon45>", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+				// DATA symbol for the package-level var holding the func
+				index.NewSymbol(3, 3, "nested_func_pkg_level.PkgFunc", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
 			),
 			append(
 				builtinReferences,
@@ -1283,6 +1302,245 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("type_constraint_union.MockFunction", "builtin.print"),
 				index.NewReferenceNames("type_constraint_union.Numeric", "type_constraint_union.MyInt"),
 				index.NewReferenceNames("type_constraint_union.Container", "type_constraint_union.Numeric"),
+			),
+		),
+		Entry("has simple var declarations", "var_simple",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "var_simple.ExportedInt", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_simple.unexportedStr", index.ScopeLocal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_simple.WithInit", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("var_simple.ExportedInt", "builtin.int"),
+				index.NewReferenceNames("var_simple.unexportedStr", "builtin.string"),
+			),
+		),
+		Entry("has block var declarations", "var_block",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "var_block.A", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_block.B", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_block.C", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("var_block.A", "builtin.int"),
+				index.NewReferenceNames("var_block.B", "builtin.string"),
+			),
+		),
+		Entry("has typed var declarations", "var_typed",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "var_typed.Config", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
+				index.NewSymbol(3, 3, "var_typed.GlobalConfig", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_typed.GlobalPtr", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("var_typed.GlobalConfig", "var_typed.Config"),
+				index.NewReferenceNames("var_typed.GlobalPtr", "var_typed.Config"),
+				// struct field builtin type ref
+				index.NewReferenceNames("var_typed.Config", "builtin.string"),
+			),
+		),
+		Entry("has var usage in functions", "var_usage",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "var_usage.Counter", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_usage.ReadCounter", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "var_usage.WriteCounter", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "var_usage.IncrCounter", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("var_usage.ReadCounter", "var_usage.Counter"),
+				index.NewReferenceNames("var_usage.WriteCounter", "var_usage.Counter"),
+				index.NewReferenceNames("var_usage.IncrCounter", "var_usage.Counter"),
+				index.NewReferenceNames("var_usage.IncrCounter", "var_usage.Counter"),
+				index.NewReferenceNames("var_usage.Counter", "builtin.int"),
+			),
+		),
+		Entry("has var passed as func arg", "var_func_arg",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "var_func_arg.GlobalVal", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_func_arg.consume", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "var_func_arg.Use", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("var_func_arg.Use", "var_func_arg.consume"),
+				index.NewReferenceNames("var_func_arg.Use", "var_func_arg.GlobalVal"),
+				index.NewReferenceNames("var_func_arg.GlobalVal", "builtin.int"),
+			),
+		),
+		Entry("has init function modifying globals", "var_init",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "var_init.Ready", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_init.init", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("var_init.init", "var_init.Ready"),
+				index.NewReferenceNames("var_init.Ready", "builtin.bool"),
+			),
+		),
+		Entry("has multiple vars in one spec", "var_multi",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "var_multi.X", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_multi.Y", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+			),
+			append(
+				builtinReferences,
+				// Single builtin ref per ValueSpec (X and Y share one spec "var X, Y int")
+				index.NewReferenceNames("var_multi.X", "builtin.int"),
+			),
+		),
+		Entry("skips blank identifier var", "var_blank",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "var_blank.Iface).M", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "var_blank.Impl).M", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "var_blank.Iface", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
+				index.NewSymbol(3, 3, "var_blank.Impl", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
+			),
+			append(
+				builtinReferences,
+				// TYPE->FUNCTION: interface method
+				index.NewReferenceNames("var_blank.Iface", "var_blank.Iface).M"),
+				// TYPE->FUNCTION: receiver method
+				index.NewReferenceNames("var_blank.Impl", "var_blank.Impl).M"),
+				// Interface satisfaction: Iface.M -> Impl.M
+				index.NewReferenceNames("var_blank.Iface).M", "var_blank.Impl).M"),
+			),
+		),
+		Entry("has pointer operations on globals", "var_pointer_ops",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "var_pointer_ops.GlobalInt", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_pointer_ops.TakeAddr", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "var_pointer_ops.Deref", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("var_pointer_ops.TakeAddr", "var_pointer_ops.GlobalInt"),
+				index.NewReferenceNames("var_pointer_ops.GlobalInt", "builtin.int"),
+			),
+		),
+		Entry("has cross-package var references", "var_cross_pkg/app",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "var_cross_pkg/config.Debug", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "var_cross_pkg/app.Check", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("var_cross_pkg/app.Check", "var_cross_pkg/config.Debug"),
+				index.NewReferenceNames("var_cross_pkg/config.Debug", "builtin.bool"),
+				// Module import: app imports config
+				index.NewReferenceNames("var_cross_pkg/app", "var_cross_pkg/config"),
+			),
+		),
+		Entry("has simple const declarations", "const_simple",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "const_simple.ExportedInt", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "const_simple.unexportedStr", index.ScopeLocal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "const_simple.WithInit", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("const_simple.ExportedInt", "builtin.int"),
+				index.NewReferenceNames("const_simple.unexportedStr", "builtin.string"),
+			),
+		),
+		Entry("has block const declarations", "const_block",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "const_block.A", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "const_block.B", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "const_block.C", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("const_block.A", "builtin.int"),
+				index.NewReferenceNames("const_block.B", "builtin.string"),
+			),
+		),
+		Entry("has typed const declarations", "const_typed",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "const_typed.Mode", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
+				index.NewSymbol(3, 3, "const_typed.GlobalMode", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "const_typed.AltMode", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("const_typed.GlobalMode", "const_typed.Mode"),
+			),
+		),
+		Entry("has const usage in functions", "const_usage",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "const_usage.MaxRetries", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "const_usage.ReadMax", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "const_usage.UseMax", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "const_usage.DoubleCheck", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("const_usage.ReadMax", "const_usage.MaxRetries"),
+				index.NewReferenceNames("const_usage.UseMax", "const_usage.MaxRetries"),
+				index.NewReferenceNames("const_usage.DoubleCheck", "const_usage.MaxRetries"),
+				index.NewReferenceNames("const_usage.DoubleCheck", "const_usage.MaxRetries"),
+				index.NewReferenceNames("const_usage.MaxRetries", "builtin.int"),
+			),
+		),
+		Entry("has const passed as func arg", "const_func_arg",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "const_func_arg.GlobalVal", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "const_func_arg.consume", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "const_func_arg.Use", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("const_func_arg.Use", "const_func_arg.consume"),
+				index.NewReferenceNames("const_func_arg.Use", "const_func_arg.GlobalVal"),
+				index.NewReferenceNames("const_func_arg.GlobalVal", "builtin.int"),
+			),
+		),
+		Entry("has init function using const", "const_init",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "const_init.DefaultName", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "const_init.Name", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "const_init.init", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("const_init.init", "const_init.Name"),
+				index.NewReferenceNames("const_init.init", "const_init.DefaultName"),
+				index.NewReferenceNames("const_init.DefaultName", "builtin.string"),
+				index.NewReferenceNames("const_init.Name", "builtin.string"),
+			),
+		),
+		Entry("has cross-package const references", "const_cross_pkg/app",
+			append(
+				builtinSymbols,
+				index.NewSymbol(3, 3, "const_cross_pkg/config.Debug", index.ScopeGlobal, index.SymbolTypeData, nil, nil),
+				index.NewSymbol(3, 3, "const_cross_pkg/app.Check", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+			),
+			append(
+				builtinReferences,
+				index.NewReferenceNames("const_cross_pkg/app.Check", "const_cross_pkg/config.Debug"),
+				index.NewReferenceNames("const_cross_pkg/config.Debug", "builtin.bool"),
+				// Module import: app imports config
+				index.NewReferenceNames("const_cross_pkg/app", "const_cross_pkg/config"),
 			),
 		),
 		Entry("checks module imports", "module_imports/consumer",
