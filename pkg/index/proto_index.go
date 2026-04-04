@@ -1,7 +1,7 @@
 package index
 
 import (
-	"crypto/sha512"
+	"crypto/sha256"
 	"fmt"
 	"go/token"
 	"math"
@@ -391,7 +391,7 @@ func parentDir(path string) string {
 }
 
 func computeHash(contents []byte) string {
-	return fmt.Sprintf("%x", sha512.Sum512(contents))
+	return fmt.Sprintf("%x", sha256.Sum256(contents))
 }
 
 func toProtoScope(scope SymbolScope) indexpb.SymbolScope {
@@ -546,6 +546,7 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 		FilesystemPath:  path,
 		Filetype:        filetype,
 		Content:         contents,
+		ContentHash:     computeHash(contents),
 		SymbolInstances: []*indexpb.SymbolInstance{},
 		Refs:            []*indexpb.SymbolRef{},
 	}
