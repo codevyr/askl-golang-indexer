@@ -29,6 +29,21 @@ var extensionFiletypes = map[string]string{
 	".zsh":   "text/x-shellscript",
 }
 
+// FileTypeToInstanceType maps a MIME filetype string to an InstanceType for file instances.
+func FileTypeToInstanceType(filetype string) InstanceType {
+	switch filetype {
+	case "text/x-c-header":
+		return InstanceTypeHeader
+	case "text/x-makefile":
+		return InstanceTypeBuild
+	case "text/x-go", "text/x-python", "text/x-ruby", "text/x-shellscript",
+		"text/x-c", "text/javascript", "text/css", "text/html":
+		return InstanceTypeSource
+	default:
+		return InstanceTypeFile
+	}
+}
+
 func GuessFileType(filePath string, content []byte) string {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if ext != "" {

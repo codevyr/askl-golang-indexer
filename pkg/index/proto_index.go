@@ -206,6 +206,7 @@ func (i *ProtoIndex) createModuleSymbols() {
 			fileLen := int32(len(file.Content))
 			file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
 				SymbolLocalId: symbolID,
+				InstanceType:  toProtoInstanceType(InstanceTypeContainment),
 				StartOffset:   0,
 				EndOffset:     fileLen,
 			})
@@ -324,6 +325,7 @@ func (i *ProtoIndex) createDirectorySymbols() {
 		// Self-instance [0,0) on sentinel
 		sentinel.SymbolInstances = append(sentinel.SymbolInstances, &indexpb.SymbolInstance{
 			SymbolLocalId: symbolID,
+			InstanceType:  toProtoInstanceType(InstanceTypeSentinel),
 			StartOffset:   0,
 			EndOffset:     0,
 		})
@@ -346,6 +348,7 @@ func (i *ProtoIndex) createDirectorySymbols() {
 		fileLen := int32(len(file.Content))
 		file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
 			SymbolLocalId: symID,
+			InstanceType:  toProtoInstanceType(InstanceTypeContainment),
 			StartOffset:   0,
 			EndOffset:     fileLen,
 		})
@@ -427,8 +430,37 @@ func toProtoType(symbolType SymbolType) indexpb.SymbolType {
 		return indexpb.SymbolType_TYPE
 	case SymbolTypeData:
 		return indexpb.SymbolType_DATA
+	case SymbolTypeField:
+		return indexpb.SymbolType_FIELD
+	case SymbolTypeMacro:
+		return indexpb.SymbolType_MACRO
 	default:
 		return indexpb.SymbolType_SYMBOL_TYPE_UNSPECIFIED
+	}
+}
+
+func toProtoInstanceType(instanceType InstanceType) indexpb.InstanceType {
+	switch instanceType {
+	case InstanceTypeDefinition:
+		return indexpb.InstanceType_DEFINITION
+	case InstanceTypeDeclaration:
+		return indexpb.InstanceType_DECLARATION
+	case InstanceTypeExpansion:
+		return indexpb.InstanceType_EXPANSION
+	case InstanceTypeSentinel:
+		return indexpb.InstanceType_SENTINEL
+	case InstanceTypeContainment:
+		return indexpb.InstanceType_CONTAINMENT
+	case InstanceTypeSource:
+		return indexpb.InstanceType_SOURCE
+	case InstanceTypeHeader:
+		return indexpb.InstanceType_HEADER
+	case InstanceTypeBuild:
+		return indexpb.InstanceType_BUILD
+	case InstanceTypeFile:
+		return indexpb.InstanceType_INST_FILE
+	default:
+		return indexpb.InstanceType_INSTANCE_TYPE_UNSPECIFIED
 	}
 }
 
@@ -532,8 +564,10 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 
 	// Create file symbol instance covering entire file
 	fileLen := int32(len(contents))
+	fileInstType := FileTypeToInstanceType(filetype)
 	file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
 		SymbolLocalId: fileSymbolID,
+		InstanceType:  toProtoInstanceType(fileInstType),
 		StartOffset:   0,
 		EndOffset:     fileLen,
 	})
@@ -561,7 +595,7 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 	return FileId(fileID), nil
 }
 
-func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, start token.Position, end token.Position) (SymbolId, SymbolInstanceId, error) {
+func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, instanceType InstanceType, start token.Position, end token.Position) (SymbolId, SymbolInstanceId, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -573,6 +607,16 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 	file := i.fileByID[int64(fileId)]
 	if file == nil {
 		return -1, -1, fmt.Errorf("file %d not found", fileId)
+	}
+
+	if symbolType == 0 {
+		return -1, -1, fmt.Errorf("SymbolType is not set for symbol %s in file %d", name, fileId)
+	}
+	if start.Offset > math.MaxInt32 || start.Offset < 0 {
+		return -1, -1, fmt.Errorf("start offset out of range for %s", name)
+	}
+	if end.Offset > math.MaxInt32 || end.Offset < 0 {
+		return -1, -1, fmt.Errorf("end offset out of range for %s", name)
 	}
 
 	// Symbol key is now project-scoped (no moduleID)
@@ -606,21 +650,12 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 		return SymbolId(symbolID), instanceID, nil
 	}
 
-	if symbolType == 0 {
-		return -1, -1, fmt.Errorf("SymbolType is not set for symbol %s in file %d", name, fileId)
-	}
-	if start.Offset > math.MaxInt32 || start.Offset < 0 {
-		return -1, -1, fmt.Errorf("start offset out of range for %s", name)
-	}
-	if end.Offset > math.MaxInt32 || end.Offset < 0 {
-		return -1, -1, fmt.Errorf("end offset out of range for %s", name)
-	}
-
 	instanceID := SymbolInstanceId(i.nextInstanceID)
 	i.nextInstanceID++
 
 	file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
 		SymbolLocalId: symbolID,
+		InstanceType:  toProtoInstanceType(instanceType),
 		StartOffset:   int32(start.Offset),
 		EndOffset:     int32(end.Offset),
 	})
