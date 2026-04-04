@@ -61,6 +61,20 @@ func NewFileParser(parser *ParsingStage, pkg *packages.Package, rootPath string,
 	}, nil
 }
 
+// addDocInstance creates a documentation instance for a symbol if it has a doc comment.
+func (f *FileParser) addDocInstance(symbolName string, scope index.SymbolScope,
+	symbolType index.SymbolType, doc *ast.CommentGroup) {
+	if doc == nil {
+		return
+	}
+	start := f.pkg.Fset.Position(doc.Pos())
+	end := f.pkg.Fset.Position(doc.End())
+	if _, _, err := f.index.AddSymbol(f.moduleId, f.fileId, symbolName, scope, symbolType,
+		index.InstanceTypeDocumentation, start, end); err != nil {
+		logging.Errorf("Failed to add documentation instance for %s: %v", symbolName, err)
+	}
+}
+
 func (f *FileParser) addInterfaceMethods(interfaceType *ast.InterfaceType) (bool, error) {
 	for _, method := range interfaceType.Methods.List {
 		if len(method.Names) == 0 {
@@ -372,6 +386,7 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 	if err != nil {
 		return false, fmt.Errorf("failed to add symbol: %s", err)
 	}
+	f.addDocInstance(fullName, symbolScope, index.SymbolTypeFunction, fn.Doc)
 
 	// Record deferred TYPE->FUNCTION reference for methods with receivers
 	if fn.Recv != nil && len(fn.Recv.List) > 0 {
@@ -586,6 +601,7 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, pare
 	if err != nil {
 		return false, fmt.Errorf("failed to add TYPE symbol %s: %w", fullName, err)
 	}
+	f.addDocInstance(fullName, symbolScope, index.SymbolTypeType, ts.Doc)
 
 	// 3d. Walk TypeParams for generic constraint references
 	if ts.TypeParams != nil {
@@ -708,6 +724,11 @@ func (f *FileParser) valueDeclParser(parser *ParsingStage, gd *ast.GenDecl) erro
 			if err != nil {
 				return fmt.Errorf("failed to add DATA symbol %s: %w", fullName, err)
 			}
+			doc := vs.Doc
+			if doc == nil {
+				doc = gd.Doc
+			}
+			f.addDocInstance(fullName, symbolScope, index.SymbolTypeData, doc)
 			hasPackageLevelValue = true
 		}
 		// If this ValueSpec has an explicit type annotation and at least one

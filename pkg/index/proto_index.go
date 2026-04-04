@@ -459,6 +459,8 @@ func toProtoInstanceType(instanceType InstanceType) indexpb.InstanceType {
 		return indexpb.InstanceType_BUILD
 	case InstanceTypeFile:
 		return indexpb.InstanceType_INST_FILE
+	case InstanceTypeDocumentation:
+		return indexpb.InstanceType_DOCUMENTATION
 	default:
 		return indexpb.InstanceType_INSTANCE_TYPE_UNSPECIFIED
 	}

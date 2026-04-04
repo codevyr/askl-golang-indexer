@@ -69,6 +69,29 @@ var builtinSymbols = []*index.SymbolDecl{
 	index.NewSymbol(1, 1, "builtin.false", index.ScopeLocal, index.SymbolTypeData, nil, nil),
 	index.NewSymbol(1, 1, "builtin.iota", index.ScopeLocal, index.SymbolTypeData, nil, nil),
 	index.NewSymbol(1, 1, "builtin.nil", index.ScopeLocal, index.SymbolTypeData, nil, nil),
+	// builtin documentation instances (doc comments)
+	index.NewSymbol(1, 1, "builtin.append", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.cap", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.clear", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.close", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.complex", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.copy", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.delete", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.imag", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.len", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.make", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.max", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.min", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.new", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.panic", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.print", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.println", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.real", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.recover", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(1, 1, "builtin.true", index.ScopeLocal, index.SymbolTypeData, nil, nil),
+	index.NewSymbol(1, 1, "builtin.false", index.ScopeLocal, index.SymbolTypeData, nil, nil),
+	index.NewSymbol(1, 1, "builtin.iota", index.ScopeLocal, index.SymbolTypeData, nil, nil),
+	index.NewSymbol(1, 1, "builtin.nil", index.ScopeLocal, index.SymbolTypeData, nil, nil),
 	// unsafe package functions (manually parsed from compiler-provided package)
 	index.NewSymbol(2, 2, "unsafe.Sizeof", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 	index.NewSymbol(2, 2, "unsafe.Offsetof", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
@@ -80,6 +103,15 @@ var builtinSymbols = []*index.SymbolDecl{
 	index.NewSymbol(2, 2, "unsafe.StringData", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 	// unsafe TYPE symbols
 	index.NewSymbol(2, 2, "unsafe.Pointer", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
+	// unsafe documentation instances (doc comments)
+	index.NewSymbol(2, 2, "unsafe.Sizeof", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.Offsetof", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.Alignof", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.Add", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.Slice", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.SliceData", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.String", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(2, 2, "unsafe.StringData", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 	// cmp package functions
 	index.NewSymbol(3, 3, "cmp.Compare", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 	index.NewSymbol(3, 3, "cmp.Less", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
@@ -87,6 +119,11 @@ var builtinSymbols = []*index.SymbolDecl{
 	index.NewSymbol(3, 3, "cmp.isNaN", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
 	// cmp TYPE symbols
 	index.NewSymbol(3, 3, "cmp.Ordered", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
+	// cmp documentation instances (doc comments)
+	index.NewSymbol(3, 3, "cmp.Compare", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(3, 3, "cmp.Less", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(3, 3, "cmp.Or", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+	index.NewSymbol(3, 3, "cmp.isNaN", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
 }
 
 var builtinReferences = []*index.ReferenceNames{
@@ -527,6 +564,7 @@ var _ = Describe("PackageParser", func() {
 				index.NewSymbol(3, 3, "type_params.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "type_params.isNaN", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "type_params.cmpLess", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "type_params.cmpLess", index.ScopeLocal, index.SymbolTypeFunction, nil, nil), // doc instance
 				index.NewSymbol(3, 3, "type_params.insertionSortOrdered", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
 				// TYPE symbols
 				index.NewSymbol(3, 3, "type_params.Integer", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
@@ -893,6 +931,7 @@ var _ = Describe("PackageParser", func() {
 				builtinSymbols,
 				index.NewSymbol(3, 3, "anonymous_interface.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "anonymous_interface.ClearUnknown", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "anonymous_interface.ClearUnknown", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil), // doc instance
 				index.NewSymbol(3, 3, "(interface).Has", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "fieldNum).Has", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				// TYPE symbols
