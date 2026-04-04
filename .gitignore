@@ -8,3 +8,7 @@
 index*.pb
 .gocache
 bin/
+
+.codex
+
+generate_index.sh
