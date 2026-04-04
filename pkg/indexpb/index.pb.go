@@ -150,21 +150,23 @@ const (
 	InstanceType_HEADER                    InstanceType = 7
 	InstanceType_BUILD                     InstanceType = 8
 	InstanceType_INST_FILE                 InstanceType = 9
+	InstanceType_DOCUMENTATION             InstanceType = 10
 )
 
 // Enum value maps for InstanceType.
 var (
 	InstanceType_name = map[int32]string{
-		0: "INSTANCE_TYPE_UNSPECIFIED",
-		1: "DEFINITION",
-		2: "DECLARATION",
-		3: "EXPANSION",
-		4: "SENTINEL",
-		5: "CONTAINMENT",
-		6: "SOURCE",
-		7: "HEADER",
-		8: "BUILD",
-		9: "INST_FILE",
+		0:  "INSTANCE_TYPE_UNSPECIFIED",
+		1:  "DEFINITION",
+		2:  "DECLARATION",
+		3:  "EXPANSION",
+		4:  "SENTINEL",
+		5:  "CONTAINMENT",
+		6:  "SOURCE",
+		7:  "HEADER",
+		8:  "BUILD",
+		9:  "INST_FILE",
+		10: "DOCUMENTATION",
 	}
 	InstanceType_value = map[string]int32{
 		"INSTANCE_TYPE_UNSPECIFIED": 0,
@@ -177,6 +179,7 @@ var (
 		"HEADER":                    7,
 		"BUILD":                     8,
 		"INST_FILE":                 9,
+		"DOCUMENTATION":             10,
 	}
 )
 
@@ -614,7 +617,7 @@ const file_index_proto_rawDesc = "" +
 	"\x04TYPE\x10\x05\x12\b\n" +
 	"\x04DATA\x10\x06\x12\t\n" +
 	"\x05MACRO\x10\a\x12\t\n" +
-	"\x05FIELD\x10\b*\xae\x01\n" +
+	"\x05FIELD\x10\b*\xc1\x01\n" +
 	"\fInstanceType\x12\x1d\n" +
 	"\x19INSTANCE_TYPE_UNSPECIFIED\x10\x00\x12\x0e\n" +
 	"\n" +
@@ -628,7 +631,9 @@ const file_index_proto_rawDesc = "" +
 	"\n" +
 	"\x06HEADER\x10\a\x12\t\n" +
 	"\x05BUILD\x10\b\x12\r\n" +
-	"\tINST_FILE\x10\tB<Z:github.com/planetA/askl-golang-indexer/pkg/indexpb;indexpbb\x06proto3"
+	"\tINST_FILE\x10\t\x12\x11\n" +
+	"\rDOCUMENTATION\x10\n" +
+	"B<Z:github.com/planetA/askl-golang-indexer/pkg/indexpb;indexpbb\x06proto3"
 
 var (
 	file_index_proto_rawDescOnce sync.Once

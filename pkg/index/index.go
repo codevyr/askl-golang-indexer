@@ -108,6 +108,7 @@ const (
 	InstanceTypeHeader       InstanceType = 7
 	InstanceTypeBuild        InstanceType = 8
 	InstanceTypeFile         InstanceType = 9
+	InstanceTypeDocumentation InstanceType = 10
 )
 
 type SymbolId int
