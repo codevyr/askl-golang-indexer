@@ -82,7 +82,7 @@ func (f *FileParser) addInterfaceMethods(interfaceType *ast.InterfaceType) (bool
 		start := f.pkg.Fset.Position(method.Pos())
 		end := f.pkg.Fset.Position(method.End())
 
-		_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeFunction, start, end)
+		_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeField, index.InstanceTypeDeclaration, start, end)
 		if err != nil {
 			return false, fmt.Errorf("failed to add symbol: %w", err)
 		}
@@ -317,7 +317,7 @@ func (f *FileParser) funcLitParser(parser *ParsingStage, fn *ast.FuncLit, parent
 
 	name := fmt.Sprintf("%s:<anon%d>", parentFullName, start.Offset)
 
-	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, name, index.ScopeLocal, index.SymbolTypeFunction, start, end)
+	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, name, index.ScopeLocal, index.SymbolTypeFunction, index.InstanceTypeDefinition, start, end)
 	if err != nil {
 		return fmt.Errorf("failed to add anonymous function symbol: %w", err)
 	}
@@ -368,7 +368,7 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 
 	start := f.pkg.Fset.Position(fn.Pos())
 	end := f.pkg.Fset.Position(fn.End())
-	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeFunction, start, end)
+	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeFunction, index.InstanceTypeDefinition, start, end)
 	if err != nil {
 		return false, fmt.Errorf("failed to add symbol: %s", err)
 	}
@@ -582,7 +582,7 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, pare
 	start := f.pkg.Fset.Position(ts.Pos())
 	end := f.pkg.Fset.Position(ts.End())
 
-	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeType, start, end)
+	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeType, index.InstanceTypeDefinition, start, end)
 	if err != nil {
 		return false, fmt.Errorf("failed to add TYPE symbol %s: %w", fullName, err)
 	}
@@ -624,7 +624,7 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, pare
 				methodStart := f.pkg.Fset.Position(method.Pos())
 				methodEnd := f.pkg.Fset.Position(method.End())
 
-				_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, methodFullName, methodScope, index.SymbolTypeField, methodStart, methodEnd)
+				_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, methodFullName, methodScope, index.SymbolTypeField, index.InstanceTypeDeclaration, methodStart, methodEnd)
 				if err != nil {
 					return false, fmt.Errorf("failed to add interface method symbol %s: %w", methodFullName, err)
 				}
@@ -704,7 +704,7 @@ func (f *FileParser) valueDeclParser(parser *ParsingStage, gd *ast.GenDecl) erro
 			symbolScope := GetSymbolScope(name.Name)
 			start := f.pkg.Fset.Position(vs.Pos())
 			end := f.pkg.Fset.Position(vs.End())
-			_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeData, start, end)
+			_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeData, index.InstanceTypeDefinition, start, end)
 			if err != nil {
 				return fmt.Errorf("failed to add DATA symbol %s: %w", fullName, err)
 			}
