@@ -599,7 +599,7 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, pare
 
 	switch iface := ts.Type.(type) {
 	case *ast.InterfaceType:
-		// 3b. For interfaces — add methods and create TYPE->FUNCTION refs
+		// 3b. For interfaces — add methods as FIELD symbols and create TYPE->FIELD refs
 		if iface.Methods != nil {
 			var embeddedExprs []ast.Expr
 			typeNameStart := f.pkg.Fset.Position(ts.Name.Pos())
@@ -624,14 +624,14 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, pare
 				methodStart := f.pkg.Fset.Position(method.Pos())
 				methodEnd := f.pkg.Fset.Position(method.End())
 
-				_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, methodFullName, methodScope, index.SymbolTypeFunction, methodStart, methodEnd)
+				_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, methodFullName, methodScope, index.SymbolTypeField, methodStart, methodEnd)
 				if err != nil {
 					return false, fmt.Errorf("failed to add interface method symbol %s: %w", methodFullName, err)
 				}
 
-				// TYPE->FUNCTION reference: from_offset at the type name position
+				// TYPE->FIELD reference: from_offset at the type name position
 				if addErr := f.index.AddReference(f.fileId, methodStart, methodFullName, typeNameStart, typeNameEnd); addErr != nil {
-					logging.Errorf("Failed to add TYPE->FUNCTION reference: %v", addErr)
+					logging.Errorf("Failed to add TYPE->FIELD reference: %v", addErr)
 				}
 			}
 			if len(embeddedExprs) > 0 {

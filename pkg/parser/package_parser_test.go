@@ -272,7 +272,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("is an interface call", "interface_call",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "interface_call.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "interface_call.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "interface_call.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call.CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				// TYPE symbols
@@ -293,7 +293,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("is an interface call (2)", "interface_call2",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "interface_call2.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "interface_call2.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "interface_call2.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call2.CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				// TYPE symbols
@@ -314,7 +314,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("is an interface call (3)", "interface_call3",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "interface_call3.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "interface_call3.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "interface_call3.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call3.CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				// TYPE symbols
@@ -335,7 +335,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("is an interface call (4)", "interface_call4",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "interface_call4.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "interface_call4.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "interface_call4.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call4.CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call4.foo", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
@@ -358,7 +358,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("is an interface call via closure return", "interface_call5",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "interface_call5.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "interface_call5.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "interface_call5.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call5.CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call5.CallInterface:<anon219>", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
@@ -381,7 +381,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("is an interface call via nested closures", "interface_call6",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "interface_call6.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "interface_call6.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "interface_call6.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call6.CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call6.CallInterface:<anon219>", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
@@ -408,7 +408,7 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_values.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "return_values.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "return_values.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "return_values.wrapErrors).Error", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "return_values.wrapErrors).Unwrap", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "return_values.Foo", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
@@ -434,7 +434,7 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_values2.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "return_values2.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "return_values2.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "return_values2.Foo", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				// TYPE symbols
 				index.NewSymbol(3, 3, "return_values2.Mock", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
@@ -451,7 +451,7 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_alias.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "return_alias.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "return_alias.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "return_alias.wrapErrors).Error", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "return_alias.wrapErrors).Unwrap", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "return_alias.Foo", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
@@ -480,7 +480,7 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_alias2.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "return_alias2.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "return_alias2.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "return_alias2.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "return_alias2.Foo", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				// TYPE symbols
@@ -595,7 +595,7 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "return_grouped.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "return_grouped.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "return_grouped.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "return_grouped.Foo", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				// TYPE symbols
 				index.NewSymbol(3, 3, "return_grouped.Mock", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
@@ -657,9 +657,9 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "assign_interface.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "assign_interface.Types).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "(interface).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "(interface).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "assign_interface.Types).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
+				index.NewSymbol(3, 3, "(interface).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
+				index.NewSymbol(3, 3, "(interface).FindExtensionByName", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				// TYPE symbols
 				index.NewSymbol(3, 3, "assign_interface.Types", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 				index.NewSymbol(3, 3, "assign_interface.UnmarshalInput", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
@@ -685,7 +685,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("assign a func to any", "assign_func",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "assign_func.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "assign_func.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "assign_func.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "assign_func.CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "MockImpl).MockFunction:<anon191>", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
@@ -708,7 +708,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("has unary expression", "assign_unary",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "assign_unary.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "assign_unary.Mock).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "assign_unary.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "assign_unary.CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				// TYPE symbols
@@ -732,7 +732,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("is an indirect interface call", "interface_indirect1",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "interface_indirect1.Mock2).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "interface_indirect1.Mock2).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "interface_indirect1.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_indirect1.CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_indirect1.CallInterface:<anon280>", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
@@ -758,7 +758,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("is an interface mapping through func parameter", "interface_call7",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "interface_call7.Mock2).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "interface_call7.Mock2).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "interface_call7.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call7.CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call7.CallInterface:<anon254>", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
@@ -784,7 +784,7 @@ var _ = Describe("PackageParser", func() {
 		Entry("is an interface mapping through func parameter (2)", "interface_call8",
 			append(
 				builtinSymbols,
-				index.NewSymbol(3, 3, "interface_call8.Mock2).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "interface_call8.Mock2).MockFunction", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "interface_call8.MockImpl).MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "interface_call8.MockImpl).CallInterface", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "MockImpl).CallInterface:<anon269>", index.ScopeLocal, index.SymbolTypeFunction, nil, nil),
@@ -893,7 +893,7 @@ var _ = Describe("PackageParser", func() {
 				builtinSymbols,
 				index.NewSymbol(3, 3, "anonymous_interface.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				index.NewSymbol(3, 3, "anonymous_interface.ClearUnknown", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "(interface).Has", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "(interface).Has", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "fieldNum).Has", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
 				// TYPE symbols
 				index.NewSymbol(3, 3, "anonymous_interface.fieldNum", index.ScopeLocal, index.SymbolTypeType, nil, nil),
@@ -958,7 +958,7 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "inline_type_assert.Outer", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "(interface).GetName", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "(interface).GetName", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 			),
 			append(
 				builtinReferences,
@@ -1078,8 +1078,8 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "type_interface_embed.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "type_interface_embed.Reader).Read", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "type_interface_embed.Writer).Write", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "type_interface_embed.Reader).Read", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
+				index.NewSymbol(3, 3, "type_interface_embed.Writer).Write", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "type_interface_embed.Reader", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 				index.NewSymbol(3, 3, "type_interface_embed.Writer", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 				index.NewSymbol(3, 3, "type_interface_embed.ReadWriter", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
@@ -1249,7 +1249,7 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "type_struct_embed_interface.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "type_struct_embed_interface.Writer).Write", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "type_struct_embed_interface.Writer).Write", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "type_struct_embed_interface.Writer", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 				index.NewSymbol(3, 3, "type_struct_embed_interface.LogWriter", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 			),
@@ -1266,7 +1266,7 @@ var _ = Describe("PackageParser", func() {
 			append(
 				builtinSymbols,
 				index.NewSymbol(3, 3, "type_func_field.MockFunction", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
-				index.NewSymbol(3, 3, "(interface).Bar", index.ScopeGlobal, index.SymbolTypeFunction, nil, nil),
+				index.NewSymbol(3, 3, "(interface).Bar", index.ScopeGlobal, index.SymbolTypeField, nil, nil),
 				index.NewSymbol(3, 3, "type_func_field.Foo", index.ScopeGlobal, index.SymbolTypeType, nil, nil),
 			),
 			append(

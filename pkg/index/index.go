@@ -76,18 +76,24 @@ func (s SymbolType) String() string {
 		return "type"
 	case SymbolTypeData:
 		return "data"
+	case SymbolTypeMacro:
+		return "macro"
+	case SymbolTypeField:
+		return "field"
 	default:
 		return "unknown"
 	}
 }
 
 const (
-	SymbolTypeFunction SymbolType = iota + 1
-	SymbolTypeFile
-	SymbolTypeModule
-	SymbolTypeDirectory
-	SymbolTypeType
-	SymbolTypeData
+	SymbolTypeFunction  SymbolType = 1
+	SymbolTypeFile      SymbolType = 2
+	SymbolTypeModule    SymbolType = 3
+	SymbolTypeDirectory SymbolType = 4
+	SymbolTypeType      SymbolType = 5
+	SymbolTypeData      SymbolType = 6
+	SymbolTypeMacro     SymbolType = 7 // not emitted by Go indexer; defined for completeness
+	SymbolTypeField     SymbolType = 8
 )
 
 type SymbolId int
