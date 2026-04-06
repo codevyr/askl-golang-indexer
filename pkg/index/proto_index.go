@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/token"
 	"math"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -507,6 +508,8 @@ func (i *ProtoIndex) AddModuleImport(fromModuleId ModuleId, toModuleName string,
 }
 
 func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string, contents []byte) (FileId, error) {
+	path = filepath.Clean(path)
+
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
