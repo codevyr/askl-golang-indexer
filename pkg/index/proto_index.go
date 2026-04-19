@@ -549,7 +549,6 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 		FilesystemPath:  path,
 		Filetype:        filetype,
 		Content:         contents,
-		ContentHash:     computeHash(contents),
 		SymbolInstances: []*indexpb.SymbolInstance{},
 		Refs:            []*indexpb.SymbolRef{},
 	}
