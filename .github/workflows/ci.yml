@@ -92,6 +92,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # SBOM + provenance attestations (only when we actually push — buildkit
+          # attestations require the registry/OCI exporter). The compliance packet
+          # pulls & verifies these.
+          sbom: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          provenance: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'mode=max' || 'false' }}
 
   cleanup-untagged:
     name: Cleanup old untagged images
