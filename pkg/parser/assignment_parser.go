@@ -108,7 +108,12 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 
 				if lhsMethod.Pos().IsValid() {
 					start = f.pkg.Fset.Position(lhsMethod.Pos())
-					end = f.pkg.Fset.Position(lhsMethod.Pos() + 1) // approximate end position
+					// The whole identifier, not one byte of it: from_offset_*
+					// is the referencing token, and the dedup key in
+					// ResolveReferences is keyed on it -- a one-byte range
+					// makes an interface-satisfaction reference render as a
+					// single character.
+					end = f.pkg.Fset.Position(lhsMethod.Pos() + token.Pos(len(lhsMethod.Name())))
 					fileId, err = f.index.FindFileId(start.Filename)
 					if err != nil {
 						return fmt.Errorf("failed to find file ID for %s: %w", start.Filename, err)
@@ -120,7 +125,7 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 					}
 				}
 
-				err = f.index.AddReference(fileId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethodName, start, end)
+				err = f.index.AddReference(fileId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethodName, start, end, nil)
 				if err != nil {
 					return fmt.Errorf("failed to add reference: %w", err)
 				}

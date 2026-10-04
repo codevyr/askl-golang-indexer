@@ -12,12 +12,12 @@ import (
 )
 
 type FileParser struct {
-	filepath         string
-	fileId           index.FileId
-	moduleId         index.ModuleId
-	ast              *ast.File
-	pkg              *packages.Package
-	index            index.Index
+	filepath        string
+	fileId          index.FileId
+	moduleId        index.ModuleId
+	ast             *ast.File
+	pkg             *packages.Package
+	index           index.Index
 	anonFuncByPos   map[int]string    // FuncLit start offset -> full name
 	varToFuncLitPos map[token.Pos]int // var def token.Pos -> FuncLit start offset
 	// varToFuncLitPos is file-scoped and never cleared between functions.
@@ -50,15 +50,29 @@ func NewFileParser(parser *ParsingStage, pkg *packages.Package, rootPath string,
 	}
 
 	return &FileParser{
-		filepath:      filepath,
-		ast:           ast,
-		pkg:           pkg,
-		index:         idx,
-		fileId:        fileId,
-		moduleId:      moduleId,
+		filepath:        filepath,
+		ast:             ast,
+		pkg:             pkg,
+		index:           idx,
+		fileId:          fileId,
+		moduleId:        moduleId,
 		anonFuncByPos:   make(map[int]string),
 		varToFuncLitPos: make(map[token.Pos]int),
 	}, nil
+}
+
+// span converts an AST position range to the byte offsets an instance's finer
+// spans are expressed in.  Both ends must be valid: a declaration with no body
+// has no content span, and "absent" is a meaning the wire format carries.
+//
+// Callers must nil-check the node first -- ast.Node methods have pointer
+// receivers, so a nil *ast.BlockStmt panics rather than reporting an invalid
+// position.
+func (f *FileParser) span(pos, end token.Pos) *index.Span {
+	if !pos.IsValid() || !end.IsValid() {
+		return nil
+	}
+	return index.NewSpan(f.pkg.Fset.Position(pos).Offset, f.pkg.Fset.Position(end).Offset)
 }
 
 // addDocInstance creates a documentation instance for a symbol if it has a doc comment.
@@ -69,8 +83,10 @@ func (f *FileParser) addDocInstance(symbolName string, scope index.SymbolScope,
 	}
 	start := f.pkg.Fset.Position(doc.Pos())
 	end := f.pkg.Fset.Position(doc.End())
+	// No finer spans: a doc comment has no identifier and no body, and a
+	// content span equal to the extent would say nothing.
 	if _, _, err := f.index.AddSymbol(f.moduleId, f.fileId, symbolName, scope, symbolType,
-		index.InstanceTypeDocumentation, start, end); err != nil {
+		index.InstanceTypeDocumentation, start, end, index.Spans{}, index.NoParent); err != nil {
 		logging.Errorf("Failed to add documentation instance for %s: %v", symbolName, err)
 	}
 }
@@ -96,7 +112,10 @@ func (f *FileParser) addInterfaceMethods(interfaceType *ast.InterfaceType) (bool
 		start := f.pkg.Fset.Position(method.Pos())
 		end := f.pkg.Fset.Position(method.End())
 
-		_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeField, index.InstanceTypeDeclaration, start, end)
+		// The extent is `Name(args) result`, so the signature span would just
+		// repeat it; only the identifier is worth separating.
+		_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeField, index.InstanceTypeDeclaration, start, end,
+			index.Spans{Name: f.span(methodName.Pos(), methodName.End())}, index.NoParent)
 		if err != nil {
 			return false, fmt.Errorf("failed to add symbol: %w", err)
 		}
@@ -147,7 +166,7 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 
 		// Handle anonymous function literals (nested functions)
 		if funcLit, ok := n.(*ast.FuncLit); ok {
-			err = f.funcLitParser(parser, funcLit, parentFullName)
+			err = f.funcLitParser(parser, funcLit, parentFullName, index.NoParent)
 			if err != nil {
 				return false
 			}
@@ -189,7 +208,7 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 								varPos := f.pkg.Fset.Position(obj.Pos())
 								start := f.pkg.Fset.Position(ident.Pos())
 								end := f.pkg.Fset.Position(ident.End())
-								err = f.index.AddReference(f.fileId, varPos, funcName, start, end)
+								err = f.index.AddReference(f.fileId, varPos, funcName, start, end, nil)
 								if err != nil {
 									return false
 								}
@@ -314,7 +333,23 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 				pos = fallbackPos
 			}
 
-			err = f.index.AddReference(f.fileId, pos, call, start, end)
+			// The REFERENCING TOKEN is the identifier that names the symbol --
+			// `Target` in `a.Target(x)`, `Bump` in `mk().Bump()` -- and the
+			// whole call is the construct around it.  Both used to be the call
+			// expression, which made every Go reference span its own arguments;
+			// the wire format reserves from_offset_* for the token and `full`
+			// for the construct, as the C indexer already does (`printk` inside
+			// `printk(foo)`).
+			//
+			// `ident`, not callExpr.Fun: for a selector, Fun is the ENTIRE
+			// receiver expression, so a chain like `mk().Bump()` or
+			// `reg["k"].Bump()` would give a token spanning other calls --
+			// each of them a separate reference nested inside this one's
+			// "name".
+			tokStart := f.pkg.Fset.Position(ident.Pos())
+			tokEnd := f.pkg.Fset.Position(ident.End())
+			err = f.index.AddReference(f.fileId, pos, call, tokStart, tokEnd,
+				index.NewSpan(start.Offset, end.Offset))
 			if err != nil {
 				return false
 			}
@@ -325,13 +360,23 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 	return
 }
 
-func (f *FileParser) funcLitParser(parser *ParsingStage, fn *ast.FuncLit, parentFullName string) error {
+// funcLitParser adds a function literal's symbol and walks its body.
+//
+// `parent` states the literal's place in the containment tree, which matters
+// only for an initialiser: a literal inside a function body is already inside
+// that body's range, so index.NoParent derives the right answer there.
+func (f *FileParser) funcLitParser(parser *ParsingStage, fn *ast.FuncLit, parentFullName string, parent index.SymbolInstanceId) error {
 	start := f.pkg.Fset.Position(fn.Pos())
 	end := f.pkg.Fset.Position(fn.End())
 
 	name := fmt.Sprintf("%s:<anon%d>", parentFullName, start.Offset)
 
-	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, name, index.ScopeLocal, index.SymbolTypeFunction, index.InstanceTypeDefinition, start, end)
+	// A literal has no identifier, hence no name span.
+	spans := index.Spans{Signature: f.span(fn.Pos(), fn.Type.End())}
+	if fn.Body != nil {
+		spans.Content = f.span(fn.Body.Pos(), fn.Body.End())
+	}
+	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, name, index.ScopeLocal, index.SymbolTypeFunction, index.InstanceTypeDefinition, start, end, spans, parent)
 	if err != nil {
 		return fmt.Errorf("failed to add anonymous function symbol: %w", err)
 	}
@@ -382,7 +427,18 @@ func (f *FileParser) funcDeclParser(parser *ParsingStage, fn *ast.FuncDecl) (boo
 
 	start := f.pkg.Fset.Position(fn.Pos())
 	end := f.pkg.Fset.Position(fn.End())
-	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeFunction, index.InstanceTypeDefinition, start, end)
+	// The signature span starts at the declaration, not the name, so it
+	// carries `func` and the receiver -- which is the whole point for a method
+	// whose signature spills over several lines.  A declaration with no body
+	// (an assembly stub) has no content span.
+	spans := index.Spans{
+		Name:      f.span(fn.Name.Pos(), fn.Name.End()),
+		Signature: f.span(fn.Pos(), fn.Type.End()),
+	}
+	if fn.Body != nil {
+		spans.Content = f.span(fn.Body.Pos(), fn.Body.End())
+	}
+	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeFunction, index.InstanceTypeDefinition, start, end, spans, index.NoParent)
 	if err != nil {
 		return false, fmt.Errorf("failed to add symbol: %s", err)
 	}
@@ -476,7 +532,7 @@ func (f *FileParser) addTypeRefs(parser *ParsingStage, refs []typeRef) {
 			continue
 		}
 		fullName := typeFullName(ref.typeName)
-		if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd); addErr != nil {
+		if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil); addErr != nil {
 			logging.Errorf("Failed to add type reference: %v", addErr)
 		}
 	}
@@ -516,7 +572,7 @@ func (f *FileParser) addBuiltinTypeRefs(parser *ParsingStage, exprs ...ast.Expr)
 			}
 			useStart := f.pkg.Fset.Position(n.Pos())
 			useEnd := f.pkg.Fset.Position(n.End())
-			if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd); addErr != nil {
+			if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil); addErr != nil {
 				logging.Errorf("Failed to add builtin type reference: %v", addErr)
 			}
 		case *ast.StarExpr:
@@ -597,7 +653,14 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, pare
 	start := f.pkg.Fset.Position(ts.Pos())
 	end := f.pkg.Fset.Position(ts.End())
 
-	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeType, index.InstanceTypeDefinition, start, end)
+	// No signature span: for a type the notion is not well defined -- `type`
+	// plus the name plus any type parameters is not what a reader means by one
+	// -- and absence is how the format says so.
+	spans := index.Spans{Name: f.span(ts.Name.Pos(), ts.Name.End())}
+	if ts.Type != nil {
+		spans.Content = f.span(ts.Type.Pos(), ts.Type.End())
+	}
+	_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeType, index.InstanceTypeDefinition, start, end, spans, index.NoParent)
 	if err != nil {
 		return false, fmt.Errorf("failed to add TYPE symbol %s: %w", fullName, err)
 	}
@@ -640,13 +703,14 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, pare
 				methodStart := f.pkg.Fset.Position(method.Pos())
 				methodEnd := f.pkg.Fset.Position(method.End())
 
-				_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, methodFullName, methodScope, index.SymbolTypeField, index.InstanceTypeDeclaration, methodStart, methodEnd)
+				_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, methodFullName, methodScope, index.SymbolTypeField, index.InstanceTypeDeclaration, methodStart, methodEnd,
+					index.Spans{Name: f.span(methodName.Pos(), methodName.End())}, index.NoParent)
 				if err != nil {
 					return false, fmt.Errorf("failed to add interface method symbol %s: %w", methodFullName, err)
 				}
 
 				// TYPE->FIELD reference: from_offset at the type name position
-				if addErr := f.index.AddReference(f.fileId, methodStart, methodFullName, typeNameStart, typeNameEnd); addErr != nil {
+				if addErr := f.index.AddReference(f.fileId, methodStart, methodFullName, typeNameStart, typeNameEnd, nil); addErr != nil {
 					logging.Errorf("Failed to add TYPE->FIELD reference: %v", addErr)
 				}
 			}
@@ -692,7 +756,7 @@ func (f *FileParser) addPackageLevelDataRef(obj types.Object, ident *ast.Ident) 
 	defPos := f.pkg.Fset.Position(obj.Pos())
 	useStart := f.pkg.Fset.Position(ident.Pos())
 	useEnd := f.pkg.Fset.Position(ident.End())
-	return f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd)
+	return f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil)
 }
 
 // valueDeclParser extracts package-level variable or constant declarations as
@@ -705,7 +769,7 @@ func (f *FileParser) valueDeclParser(parser *ParsingStage, gd *ast.GenDecl) erro
 			continue
 		}
 		hasPackageLevelValue := false
-		for _, name := range vs.Names {
+		for nameIdx, name := range vs.Names {
 			if name.Name == "_" {
 				continue // skip blank identifier
 			}
@@ -718,12 +782,51 @@ func (f *FileParser) valueDeclParser(parser *ParsingStage, gd *ast.GenDecl) erro
 			}
 			fullName := f.pkg.PkgPath + "." + obj.Name()
 			symbolScope := GetSymbolScope(name.Name)
+			// A grouped spec declares several names over ONE range, and giving
+			// each name all of it is not just imprecise -- it is wrong.  The
+			// names then have equal extents, so containment cannot order them:
+			// the numbering makes the earlier ones childless and hands the LAST
+			// one every initialiser in the spec.  Measured on
+			// `var First, Second = func(){...}, func(){...}`: `First { target }`
+			// returned nothing and `Second { target }` returned both closures,
+			// one of which is First's.
+			//
+			// So a multi-name spec WITH INITIALISERS gives each name its own
+			// identifier and nothing else, and states the parentage separately
+			// (below) so each initialiser still belongs to its own variable.
+			//
+			// Only with initialisers.  `var X, Y int` has nothing inside the
+			// spec that belongs to one name in particular -- the shared type
+			// annotation applies to both -- and narrowing there would put the
+			// DATA->TYPE reference inside neither, losing `X -> int` rather
+			// than merely moving it.  So those names keep the whole spec and
+			// stay co-extensive, which costs nothing: the only thing inside is
+			// the annotation they share.
 			start := f.pkg.Fset.Position(vs.Pos())
 			end := f.pkg.Fset.Position(vs.End())
-			_, _, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeData, index.InstanceTypeDefinition, start, end)
+			spans := index.Spans{Name: f.span(name.Pos(), name.End())}
+			if len(vs.Names) > 1 && len(vs.Values) > 0 {
+				start = f.pkg.Fset.Position(name.Pos())
+				end = f.pkg.Fset.Position(name.End())
+			} else if len(vs.Values) == len(vs.Names) {
+				spans.Content = f.span(vs.Values[nameIdx].Pos(), vs.Values[nameIdx].End())
+			}
+			_, instanceID, err := f.index.AddSymbol(f.moduleId, f.fileId, fullName, symbolScope, index.SymbolTypeData, index.InstanceTypeDefinition, start, end, spans, index.NoParent)
 			if err != nil {
 				return fmt.Errorf("failed to add DATA symbol %s: %w", fullName, err)
 			}
+			// Claim this name's own initialiser before the generic walk gets
+			// to it.  `Parse` would otherwise reach the literal as an
+			// unattached node and attribute it to the package, which for a
+			// grouped spec is the only chance anyone has to know whose it is:
+			// `var First, Second = f1, f2` gives both names one range, so no
+			// extent distinguishes f1 from f2.
+			if len(vs.Values) == len(vs.Names) {
+				if err := f.initialiserFuncLits(parser, vs.Values[nameIdx], fullName, instanceID); err != nil {
+					return err
+				}
+			}
+
 			doc := vs.Doc
 			if doc == nil {
 				doc = gd.Doc
@@ -740,6 +843,33 @@ func (f *FileParser) valueDeclParser(parser *ParsingStage, gd *ast.GenDecl) erro
 		}
 	}
 	return nil
+}
+
+// initialiserFuncLits parses the function literals directly inside one
+// declaration's initialiser, stating that the declared symbol owns them.
+//
+// Without this they would be numbered wherever their RANGE puts them, which for
+// a grouped declaration is "inside whichever name the sort order reached last"
+// -- measured on `var First, Second = func(){...}, func(){...}`:
+// `First { ... }` found nothing and `Second { ... }` found both closures.
+func (f *FileParser) initialiserFuncLits(parser *ParsingStage, expr ast.Expr,
+	ownerName string, owner index.SymbolInstanceId) error {
+	var err error
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if err != nil {
+			return false
+		}
+		lit, ok := n.(*ast.FuncLit)
+		if !ok {
+			return true
+		}
+		if _, done := f.anonFuncByPos[f.pkg.Fset.Position(lit.Pos()).Offset]; done {
+			return false
+		}
+		err = f.funcLitParser(parser, lit, ownerName, owner)
+		return false // funcLitParser walks the body, including nested literals
+	})
+	return err
 }
 
 func (f *FileParser) Parse(parser *ParsingStage) (err error) {
@@ -759,7 +889,7 @@ func (f *FileParser) Parse(parser *ParsingStage) (err error) {
 			// are only discovered here.
 			start := f.pkg.Fset.Position(n.Pos())
 			if _, alreadyProcessed := f.anonFuncByPos[start.Offset]; !alreadyProcessed {
-				err = f.funcLitParser(parser, n, f.pkg.PkgPath)
+				err = f.funcLitParser(parser, n, f.pkg.PkgPath, index.NoParent)
 				if err != nil {
 					logging.Errorf("Failed to parse function literal: %v", err)
 					return false

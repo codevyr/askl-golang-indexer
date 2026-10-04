@@ -111,8 +111,47 @@ const (
 	InstanceTypeDocumentation InstanceType = 10
 )
 
+// Span is a half-open [Start, End) byte range inside an instance's extent.
+type Span struct {
+	Start int
+	End   int
+}
+
+// Spans are the finer ranges inside an instance's extent, each OPTIONAL: a nil
+// field means "this producer does not know", which is how the wire format reads
+// an absent span too.  The extent itself stays the authoritative thing an
+// instance occupies; these only say which part of it is the identifier, which
+// the declaration, which the body.
+//
+// They travel with AddSymbol rather than arriving in a follow-up call so an
+// instance cannot be created with its spans forgotten.
+type Spans struct {
+	// Name is the identifier alone -- `Run` in `func Run(x int) int { ... }`.
+	Name *Span
+	// Signature is the declaration without the body, so a multi-line one can
+	// be shown whole.
+	Signature *Span
+	// Content is the body alone.
+	Content *Span
+}
+
+// span is the constructor used by producers: both ends are byte offsets from
+// the start of the object.
+func NewSpan(start, end int) *Span {
+	return &Span{Start: start, End: end}
+}
+
 type SymbolId int
 type SymbolInstanceId int
+
+// NoParent means "derive my parent from the ranges", which is the right answer
+// almost always: a declaration sits inside the text of whatever declares it.
+//
+// Pass a real instance instead when the ranges CANNOT say it. In
+// `var First, Second = f1, f2` the names share one range and First's identifier
+// is not contiguous with its own initialiser, so no extent makes f1 First's and
+// f2 Second's -- the parser knows which is which and nothing else can.
+const NoParent SymbolInstanceId = 0
 type ModuleId int64
 type FileId int64
 
@@ -125,12 +164,19 @@ type Index interface {
 	AddModuleImport(fromModuleId ModuleId, toModuleName string, fromFileId FileId, startOffset, endOffset int) error
 	AddFile(moduleId *ModuleId, baseDir, path, filetype string, contents []byte) (FileId, error)
 
-	AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, instanceType InstanceType, start token.Position, end token.Position) (SymbolId, SymbolInstanceId, error)
+	// AddSymbol records one instance of a symbol. `parent` states its place in
+	// the containment tree when the ranges cannot; see NoParent.
+	AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, instanceType InstanceType, start token.Position, end token.Position, spans Spans, parent SymbolInstanceId) (SymbolId, SymbolInstanceId, error)
 	FindSymbolId(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType) (SymbolId, SymbolInstanceId, error)
 	FindSymbolInstanceId(name string, scope SymbolScope, symbolType SymbolType) ([]SymbolInstanceId, error)
 	GetAllSymbols() ([]SymbolDecl, error)
 
-	AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position) error
+	// AddReference records a use of a symbol.  start/end delimit the REFERENCING
+	// TOKEN -- `a.Target` in `a.Target(x)` -- and full, when given, the whole
+	// construct around it.  A reference is a point in the containment order, not
+	// an interval, so these ranges are what order and display it; they never
+	// decide what contains it.
+	AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position, full *Span) error
 	ResolveReferences() error
 	GetAllReferencesNames() ([]*ReferenceNames, error)
 

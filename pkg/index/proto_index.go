@@ -54,6 +54,7 @@ type referenceLog struct {
 	toName   string
 	start    token.Position
 	end      token.Position
+	full     *Span
 }
 
 // moduleImportLog tracks module-to-module import relationships
@@ -106,6 +107,24 @@ type ProtoIndex struct {
 	instancesByLookup map[instanceLookupKey][]SymbolInstanceId
 	referencesLog    []referenceLog
 	moduleImportsLog []moduleImportLog
+
+	// createDirectorySymbols is a whole-project derivation, not an
+	// incremental one, so it must run exactly once.
+	directorySymbolsCreated bool
+
+	// Where each instance sits in its object's instance slice, and the stated
+	// parentage between those positions.  Transient producer state: the wire
+	// format has no parent field (`reserved 5, 6`) because the tree is carried
+	// by the DFS interval, so this exists only until numberObjectTrees reads it.
+	slotByInstance map[SymbolInstanceId]instanceSlot
+	statedParent   map[instanceSlot]int
+}
+
+// instanceSlot identifies an instance by its position in its object's slice,
+// which is what the numbering pass works in.
+type instanceSlot struct {
+	object int64
+	idx    int
 }
 
 var _ Index = &ProtoIndex{}
@@ -144,6 +163,8 @@ func NewProtoIndex(options ...Option) (*ProtoIndex, error) {
 		instancesByLookup:       make(map[instanceLookupKey][]SymbolInstanceId),
 		referencesLog:       []referenceLog{},
 		moduleImportsLog:    []moduleImportLog{},
+		slotByInstance:      make(map[SymbolInstanceId]instanceSlot),
+		statedParent:        make(map[instanceSlot]int),
 	}
 
 	return idx, nil
@@ -155,6 +176,7 @@ func (i *ProtoIndex) Marshal() ([]byte, error) {
 
 	i.createModuleSymbols()
 	i.createDirectorySymbols()
+	i.numberObjectTrees()
 
 	return proto.Marshal(i.project)
 }
@@ -165,6 +187,7 @@ func (i *ProtoIndex) Upload() *indexpb.Project {
 
 	i.createModuleSymbols()
 	i.createDirectorySymbols()
+	i.numberObjectTrees()
 
 	return proto.Clone(i.project).(*indexpb.Project)
 }
@@ -275,6 +298,16 @@ func (i *ProtoIndex) resolveModuleImports() {
 // - A SymbolRef on each parent directory's sentinel pointing to the child directory
 // This must be called with the mutex held.
 func (i *ProtoIndex) createDirectorySymbols() {
+	// Run once.  Marshal and Upload both call this, and a second pass would
+	// mint a second DIRECTORY symbol and sentinel object per directory, plus a
+	// second co-extensive [0, len) instance on every file -- which the
+	// containment numbering then has to order against the first.
+	// createModuleSymbols has had this guard (its `info.symbolID != 0` check)
+	// all along; this one did not.
+	if i.directorySymbolsCreated {
+		return
+	}
+
 	// Step 1: Collect all directory paths from file paths
 	dirSet := make(map[string]struct{})
 	for _, path := range i.filePathByID {
@@ -289,8 +322,13 @@ func (i *ProtoIndex) createDirectorySymbols() {
 	}
 
 	if len(dirSet) == 0 {
+		// Nothing was done, so nothing is done: setting the flag here would let
+		// one Marshal on an empty index disable directory symbols for its whole
+		// life, and every `dir(...)` query would silently answer nothing while
+		// MODULE quietly became the object root.
 		return
 	}
+	i.directorySymbolsCreated = true
 
 	// Step 2: Create directory symbols and sentinel objects
 	dirSymbolID := make(map[string]int64)   // dir path -> symbol local ID
@@ -600,7 +638,7 @@ func (i *ProtoIndex) AddFile(moduleId *ModuleId, baseDir, path, filetype string,
 	return FileId(fileID), nil
 }
 
-func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, instanceType InstanceType, start token.Position, end token.Position) (SymbolId, SymbolInstanceId, error) {
+func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, scope SymbolScope, symbolType SymbolType, instanceType InstanceType, start token.Position, end token.Position, spans Spans, parent SymbolInstanceId) (SymbolId, SymbolInstanceId, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -650,19 +688,61 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 		i.symbolByFileAndName[fileNameKey{filePath: filePath, name: name}] = symbolID
 	}
 
+	// An extent past the end of the object breaks the containment chain: the
+	// numbering sweep pops the file, directory and module instances to make
+	// room for it, so it becomes a second ROOT and every later instance in the
+	// file is numbered under it instead of inside its own file -- silently,
+	// since askld accepts a forest.  Reachable because these offsets come from
+	// go/packages' Fset while the object's length comes from an independent
+	// read of the same path.
+	if limit := len(file.Content); end.Offset > limit {
+		logging.Warnf("extent of %s ends at %d, past the %d bytes of %s; clamping",
+			name, end.Offset, limit, filePathOf(i, int64(fileId)))
+		end.Offset = limit
+		if start.Offset > limit {
+			start.Offset = limit
+		}
+	}
+
 	key := instanceKey{symbolID: symbolID, fileID: int64(fileId), start: start.Offset, end: end.Offset}
 	if instanceID, ok := i.instanceIDByKey[key]; ok {
+		// Same symbol, same file, same extent: the same instance.  The spans
+		// this call carried are dropped, so say so -- the Spans doc promises
+		// they travel with the instance, and silently keeping whichever
+		// producer path arrived first is exactly the forgetting it rules out.
+		if spans.Name != nil || spans.Signature != nil || spans.Content != nil || parent != NoParent {
+			logging.Debugf("instance of %s at [%d, %d) already exists; keeping its original spans and parent",
+				name, start.Offset, end.Offset)
+		}
 		return SymbolId(symbolID), instanceID, nil
 	}
 
 	instanceID := SymbolInstanceId(i.nextInstanceID)
 	i.nextInstanceID++
 
+	slot := instanceSlot{object: int64(fileId), idx: len(file.SymbolInstances)}
+	i.slotByInstance[instanceID] = slot
+	if parent != NoParent {
+		// Two conditions, both of which make a cycle impossible to state: the
+		// parent must live in the same object (containment never crosses
+		// objects) and must already exist, so parentage only ever points
+		// backwards through the slice.
+		if p, ok := i.slotByInstance[parent]; ok && p.object == slot.object && p.idx < slot.idx {
+			i.statedParent[slot] = p.idx
+		} else {
+			logging.Warnf("stated parent %d of %s is not an earlier instance of the same object; deriving from ranges instead",
+				parent, name)
+		}
+	}
+
 	file.SymbolInstances = append(file.SymbolInstances, &indexpb.SymbolInstance{
 		SymbolLocalId: symbolID,
 		InstanceType:  toProtoInstanceType(instanceType),
 		StartOffset:   int32(start.Offset),
 		EndOffset:     int32(end.Offset),
+		Name:          protoSpan(spans.Name, start.Offset, end.Offset, "name", name),
+		Signature:     protoSpan(spans.Signature, start.Offset, end.Offset, "signature", name),
+		Content:       protoSpan(spans.Content, start.Offset, end.Offset, "content", name),
 	})
 
 	entry := instanceEntry{
@@ -680,6 +760,75 @@ func (i *ProtoIndex) AddSymbol(moduleId ModuleId, fileId FileId, name string, sc
 	i.instancesByLookup[lookupKey] = append(i.instancesByLookup[lookupKey], instanceID)
 
 	return SymbolId(symbolID), instanceID, nil
+}
+
+// offsetsFitInt32 is the bound every offset on the wire has to satisfy.  Shared
+// so a span cannot reach the proto through a path that skipped the check that
+// AddSymbol and ResolveReferences apply to their own offsets: int32 wraps
+// silently, and a wrapped pair stores an inverted range nothing downstream
+// rejects.
+func offsetsFitInt32(start, end int) bool {
+	return start >= 0 && end >= 0 && start <= math.MaxInt32 && end <= math.MaxInt32
+}
+
+// filePathOf names an object for a diagnostic, falling back to its id.
+func filePathOf(i *ProtoIndex, fileID int64) string {
+	if p, ok := i.filePathByID[fileID]; ok {
+		return p
+	}
+	return fmt.Sprintf("file %d", fileID)
+}
+
+// refFullSpan converts a reference's optional surrounding construct.
+//
+// The containment runs the other way round from an instance's finer spans: a
+// ref's own range is the token, and `full` is what encloses it -- `a.Target`
+// inside `a.Target(x)`.  A full span that does NOT contain its token would be
+// rendered as unrelated text, so drop it and say so.
+func refFullSpan(ref referenceLog) *indexpb.Span {
+	if ref.full == nil {
+		return nil
+	}
+	if !offsetsFitInt32(ref.full.Start, ref.full.End) {
+		logging.Warnf("full span [%d, %d) of the reference to %s does not fit in the wire format; dropping it",
+			ref.full.Start, ref.full.End, ref.toName)
+		return nil
+	}
+	if ref.full.Start > ref.start.Offset || ref.full.End < ref.end.Offset {
+		logging.Warnf("full span [%d, %d) of the reference to %s does not contain its own token [%d, %d); dropping it",
+			ref.full.Start, ref.full.End, ref.toName, ref.start.Offset, ref.end.Offset)
+		return nil
+	}
+	return &indexpb.Span{Start: int32(ref.full.Start), End: int32(ref.full.End)}
+}
+
+// protoSpan converts an optional finer span, dropping anything that does not
+// sit inside the instance's own extent.
+//
+// Dropping rather than failing: a span is decoration -- absence already means
+// "the producer does not know" -- so a bad one must not cost the whole index
+// the instance.  It is still a producer bug, hence the warning: a span outside
+// the extent would read as a slice of a different symbol's text.
+func protoSpan(span *Span, start, end int, what, symbol string) *indexpb.Span {
+	if span == nil {
+		return nil
+	}
+	if !offsetsFitInt32(span.Start, span.End) {
+		logging.Warnf("%s span [%d, %d) of %s does not fit in the wire format; dropping it",
+			what, span.Start, span.End, symbol)
+		return nil
+	}
+	if span.Start > span.End {
+		logging.Warnf("%s span [%d, %d) of %s is inverted; dropping it",
+			what, span.Start, span.End, symbol)
+		return nil
+	}
+	if span.Start < start || span.End > end {
+		logging.Warnf("%s span [%d, %d) of %s lies outside its extent [%d, %d); dropping it",
+			what, span.Start, span.End, symbol, start, end)
+		return nil
+	}
+	return &indexpb.Span{Start: int32(span.Start), End: int32(span.End)}
 }
 
 func (i *ProtoIndex) FindSymbolInstanceId(name string, scope SymbolScope, symbolType SymbolType) ([]SymbolInstanceId, error) {
@@ -786,7 +935,7 @@ func (i *ProtoIndex) FindBuiltinInstance(name string) (FileId, token.Position, t
 	return FileId(-1), token.Position{}, token.Position{}, fmt.Errorf("builtin instance not found for %s", name)
 }
 
-func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position) error {
+func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position, full *Span) error {
 	// Reject start positions that are completely empty (zero-value struct).
 	// Positions with a filename but Line=0 are allowed — this occurs for
 	// compiler-provided packages like builtin/unsafe.
@@ -810,6 +959,7 @@ func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string,
 		toName:   toName,
 		start:    start,
 		end:      end,
+		full:     full,
 	})
 
 	return nil
@@ -860,6 +1010,7 @@ func (i *ProtoIndex) ResolveReferences() error {
 			ToSymbolLocalId: toSymbolID,
 			FromOffsetStart: int32(ref.start.Offset),
 			FromOffsetEnd:   int32(ref.end.Offset),
+			Full: refFullSpan(ref),
 		})
 	}
 
