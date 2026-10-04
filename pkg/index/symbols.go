@@ -126,6 +126,13 @@ func (matcher *SymbolMatcher) NegatedFailureMessage(actual any) (message string)
 type ReferenceNames struct {
 	From string
 	To   string
+
+	// FromFile is the file the reference was written in, which is how a caller
+	// tells its own code from a dependency's.  Names cannot: a package may be
+	// called `unsafe` without being the standard library's, and the matcher
+	// compares names by suffix anyway.  Empty in an expectation; the matcher
+	// ignores it.
+	FromFile string
 }
 
 func NewReferenceNames(from, to string) *ReferenceNames {

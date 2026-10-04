@@ -889,6 +889,10 @@ func (i *ProtoIndex) GetAllSymbols() ([]SymbolDecl, error) {
 	symbols := []SymbolDecl{}
 	for fileID, instances := range i.instancesByFile {
 		moduleID := i.fileModuleID[fileID]
+		// The declaring file, which is how a caller tells its own symbols from a
+		// dependency's.  The name cannot be trusted for that -- a package may be
+		// called `unsafe` without being the standard library's.
+		filePath := i.filePathByID[fileID]
 		for _, inst := range instances {
 			symbol := i.symbolByID[inst.symbolID]
 			if symbol == nil {
@@ -900,8 +904,8 @@ func (i *ProtoIndex) GetAllSymbols() ([]SymbolDecl, error) {
 				Name:       symbol.Name,
 				Scope:      fromProtoScope(symbol.Scope),
 				SymbolType: inst.symbolType,
-				Start:      token.Position{Offset: inst.start},
-				End:        token.Position{Offset: inst.end},
+				Start:      token.Position{Filename: filePath, Offset: inst.start},
+				End:        token.Position{Filename: filePath, Offset: inst.end},
 			})
 		}
 	}
@@ -1039,6 +1043,7 @@ func (i *ProtoIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 			continue
 		}
 		instances := i.instancesByFile[fileID]
+		filePath := i.filePathByID[fileID]
 
 		// Get module name for this file (for module-level refs)
 		moduleID := i.fileModuleID[fileID]
@@ -1073,8 +1078,9 @@ func (i *ProtoIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 			if bestInst != nil {
 				fromName := i.symbolNameByID[bestInst.symbolID]
 				references = append(references, &ReferenceNames{
-					From: fromName,
-					To:   toName,
+					From:     fromName,
+					To:       toName,
+					FromFile: filePath,
 				})
 			}
 
@@ -1082,8 +1088,9 @@ func (i *ProtoIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 			// attribute it to the module itself
 			if isModuleImportRef && bestInst == nil && moduleName != "" {
 				references = append(references, &ReferenceNames{
-					From: moduleName,
-					To:   toName,
+					From:     moduleName,
+					To:       toName,
+					FromFile: filePath,
 				})
 			}
 		}
