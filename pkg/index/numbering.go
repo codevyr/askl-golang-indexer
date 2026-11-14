@@ -18,18 +18,6 @@ import (
 // DfsEnter.  askld's upload validator rejects anything narrower (DFS_STRIDE).
 const dfsStride = 1024
 
-// foldStep is the fold-depth increment crossing into an instance: 1 when the
-// instance itself is a generated boundary, 0 otherwise.  Always 0 in Go, where
-// nothing is generated at a level finer than a whole file -- but this is the
-// rule the schema states and askld's upload validator enforces, so it is
-// written out rather than folded into the constant it currently equals.
-func foldStep(inst *indexpb.SymbolInstance) int32 {
-	if inst.Folded {
-		return 1
-	}
-	return 0
-}
-
 // numberObjectTrees derives every object's containment tree and numbers it.
 //
 // Containment is NOT a source range in the index: an instance owns the
@@ -83,7 +71,7 @@ func (i *ProtoIndex) numberObjectTrees() {
 // directories and a directory can hold several modules, so the two genuinely
 // overlap and each language may answer differently.  Nothing in the engine
 // depends on it -- traversal is the DFS interval plus at most one equality on
-// nesting_level or fold_depth, and the only place that names container types
+// nesting_level, and the only place that names container types
 // (`TypeSelector::update_context`) sets default child TYPES for display, which
 // tolerates either order.  So this is not a cross-producer contract, and the
 // clang indexer building its chain modules-first is not something Go has to
@@ -225,7 +213,7 @@ func numberObjectTree(obj *indexpb.Object, rankBySymbol map[int64]int, stated ma
 			obj.FilesystemPath, numbered, n)
 		for k := range insts {
 			insts[k].DfsEnter, insts[k].DfsExit = 0, 0
-			insts[k].NestingLevel, insts[k].FoldDepth = 0, 0
+			insts[k].NestingLevel = 0
 		}
 		kids, roots = childLists(derived, n, order)
 		numbered = numberForest(insts, kids, roots)
@@ -265,7 +253,6 @@ func numberForest(insts []*indexpb.SymbolInstance, kids [][]int, roots []int) in
 		counter += dfsStride
 		insts[r].DfsEnter = counter
 		insts[r].NestingLevel = 0
-		insts[r].FoldDepth = 0
 		numbered++
 		walk = append(walk[:0], frame{node: r})
 		for len(walk) > 0 {
@@ -277,18 +264,6 @@ func numberForest(insts []*indexpb.SymbolInstance, kids [][]int, roots []int) in
 				counter += dfsStride
 				insts[c].DfsEnter = counter
 				insts[c].NestingLevel = insts[node].NestingLevel + 1
-				// Nothing folds in Go today -- the fold axis marks a level that
-				// exists only because a macro generated it, and there is no
-				// preprocessor.  Generated *files* (`// Code generated ... DO
-				// NOT EDIT.`) are a file-level property, not an intra-file
-				// boundary, so hiding those belongs in a query filter.
-				//
-				// State the rule anyway rather than the constant it collapses
-				// to: askld's validator enforces `parent + (parent.folded?1:0)`
-				// and both sibling producers include the term, so a path that
-				// ever sets Folded would otherwise put every descendant off by
-				// one and fail the whole upload.
-				insts[c].FoldDepth = insts[node].FoldDepth + foldStep(insts[node])
 				numbered++
 				walk = append(walk, frame{node: c})
 			} else {
@@ -370,7 +345,6 @@ func numberRefs(obj *indexpb.Object, insts []*indexpb.SymbolInstance, order, ran
 			}
 			ref.DfsEnter = o.DfsEnter + 1
 			ref.NestingLevel = o.NestingLevel + 1
-			ref.FoldDepth = o.FoldDepth + foldStep(o)
 		}
 	}
 	for _, a := range order {
