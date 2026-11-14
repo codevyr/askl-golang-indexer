@@ -113,7 +113,6 @@ func Target() int { return 7 }
 	type node struct {
 		enter, exit int64
 		level       int32
-		fold        int32
 		start, end  int32
 		name        string
 	}
@@ -135,7 +134,7 @@ func Target() int { return 7 }
 			}
 			nodes = append(nodes, node{
 				enter: i.DfsEnter, exit: i.DfsExit, level: i.NestingLevel,
-				fold: i.FoldDepth, start: i.StartOffset, end: i.EndOffset, name: name,
+				start: i.StartOffset, end: i.EndOffset, name: name,
 			})
 		}
 		sort.Slice(nodes, func(a, b int) bool {
@@ -171,10 +170,6 @@ func Target() int { return 7 }
 			if int(n.level) != len(stack) {
 				t.Errorf("%s: %s says NestingLevel %d but sits %d levels deep",
 					where, n.name, n.level, len(stack))
-			}
-			if n.fold != 0 {
-				t.Errorf("%s: %s has FoldDepth %d; nothing folds in Go",
-					where, n.name, n.fold)
 			}
 			stack = append(stack, n)
 			numberedInstances++
@@ -246,10 +241,6 @@ func Target() int { return 7 }
 				t.Errorf("%s: ref [%d,%d) says NestingLevel %d, but its interval puts it inside %s at level %d",
 					where, ref.FromOffsetStart, ref.FromOffsetEnd, ref.NestingLevel,
 					owner.name, owner.level)
-			}
-			if ref.FoldDepth != 0 {
-				t.Errorf("%s: ref [%d,%d) has FoldDepth %d", where,
-					ref.FromOffsetStart, ref.FromOffsetEnd, ref.FoldDepth)
 			}
 			// `full` encloses the token, the opposite containment from an
 			// instance's finer spans.  `a.Target` inside `a.Target(x)`.

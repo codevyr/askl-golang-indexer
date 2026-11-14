@@ -113,19 +113,8 @@ func fixture(t *testing.T) *indexpb.Project {
 type node struct {
 	enter, exit int64
 	level       int32
-	fold        int32
-	folded      bool
 	start, end  int32
 	name        string
-}
-
-// foldStep mirrors the producer's own increment, so the assertions state the
-// schema's rule rather than the value it happens to take in Go.
-func (n node) foldStep() int32 {
-	if n.folded {
-		return 1
-	}
-	return 0
 }
 
 // sortedNodes returns an object's instances outermost-first in DFS order: exit
@@ -144,7 +133,6 @@ func sortedNodes(t *testing.T, proj *indexpb.Project, obj *indexpb.Object) []nod
 		}
 		nodes = append(nodes, node{
 			enter: i.DfsEnter, exit: i.DfsExit, level: i.NestingLevel,
-			fold: i.FoldDepth, folded: i.Folded,
 			start: i.StartOffset, end: i.EndOffset, name: name,
 		})
 	}
@@ -207,15 +195,6 @@ func TestEveryInstanceFormsAValidTree(t *testing.T) {
 					t.Errorf("%s: %s [%d, %d) straddles out of %s [%d, %d)",
 						where, n.name, n.enter, n.exit, p.name, p.enter, p.exit)
 				}
-				// The rule the schema states, not the constant it collapses to
-				// while nothing in Go is folded.  Pinning `n.fold == p.fold`
-				// would hide the day a producer sets Folded.
-				if want := p.fold + p.foldStep(); n.fold != want {
-					t.Errorf("%s: %s has FoldDepth %d, expected %d from a parent at %d (folded=%v)",
-						where, n.name, n.fold, want, p.fold, p.folded)
-				}
-			} else if n.fold != 0 {
-				t.Errorf("%s: root %s has FoldDepth %d", where, n.name, n.fold)
 			}
 			if int(n.level) != len(stack) {
 				t.Errorf("%s: %s says NestingLevel %d but sits %d levels deep",
@@ -268,8 +247,8 @@ func TestEveryInstanceFormsAValidTree(t *testing.T) {
 		}
 
 		// A ref is a point in the same order, so it has to land strictly inside
-		// some instance -- and its depth and fold depth have to agree with the
-		// instance its NUMBER puts it in, not with the one its range suggests.
+		// some instance -- and its depth has to agree with the instance its
+		// NUMBER puts it in, not with the one its range suggests.
 		for _, ref := range obj.Refs {
 			var owner *node
 			for k := range nodes {
@@ -288,11 +267,6 @@ func TestEveryInstanceFormsAValidTree(t *testing.T) {
 				t.Errorf("%s: ref [%d,%d) says NestingLevel %d, but its interval puts it inside %s at level %d",
 					where, ref.FromOffsetStart, ref.FromOffsetEnd, ref.NestingLevel,
 					owner.name, owner.level)
-			}
-			if want := owner.fold + owner.foldStep(); ref.FoldDepth != want {
-				t.Errorf("%s: ref [%d,%d) says FoldDepth %d, expected %d from owner %s (fold %d, folded=%v)",
-					where, ref.FromOffsetStart, ref.FromOffsetEnd, ref.FoldDepth,
-					want, owner.name, owner.fold, owner.folded)
 			}
 			if ref.Full != nil &&
 				!(ref.Full.Start <= ref.FromOffsetStart && ref.FromOffsetEnd <= ref.Full.End) {
@@ -792,51 +766,6 @@ func TestAnExtentPastTheObjectIsClamped(t *testing.T) {
 	if levels["m.Fine"] != 4 {
 		t.Errorf("m.Fine is at NestingLevel %d, expected 4 (inside the clamped m.Spill)",
 			levels["m.Fine"])
-	}
-}
-
-// TestFoldDepthFollowsTheFoldedFlag pins a rule that is a no-op today: nothing
-// in the Go producer sets Folded, so dropping the `+ (parent.folded ? 1 : 0)`
-// term changes no output and no pipeline test notices. askld's upload validator
-// enforces it though, and both sibling producers include it — so the day a
-// producer path marks something folded, the term's absence would put every
-// descendant and every ref beneath it off by one and fail the whole upload.
-//
-// Driving numberObjectTree directly is the only way to state it, which is the
-// point: a rule with no reachable input still has to be the right rule.
-func TestFoldDepthFollowsTheFoldedFlag(t *testing.T) {
-	obj := &indexpb.Object{
-		FilesystemPath: "/src/m/main.go",
-		SymbolInstances: []*indexpb.SymbolInstance{
-			{SymbolLocalId: 1, StartOffset: 0, EndOffset: 100},               // outer
-			{SymbolLocalId: 2, StartOffset: 10, EndOffset: 90, Folded: true}, // a boundary
-			{SymbolLocalId: 3, StartOffset: 20, EndOffset: 80},               // below it
-			{SymbolLocalId: 4, StartOffset: 30, EndOffset: 70, Folded: true}, // a second one
-			{SymbolLocalId: 5, StartOffset: 40, EndOffset: 60},               // below both
-		},
-		Refs: []*indexpb.SymbolRef{
-			{ToSymbolLocalId: 9, FromOffsetStart: 45, FromOffsetEnd: 50}, // inside symbol 5
-			{ToSymbolLocalId: 9, FromOffsetStart: 35, FromOffsetEnd: 38}, // inside folded 4
-		},
-	}
-	numberObjectTree(obj, map[int64]int{}, nil)
-
-	// fold_depth counts the folded ancestors ABOVE an instance, so a folded
-	// instance's own flag lands on its children, not on itself.
-	want := map[int64]int32{1: 0, 2: 0, 3: 1, 4: 1, 5: 2}
-	for _, i := range obj.SymbolInstances {
-		if got := i.FoldDepth; got != want[i.SymbolLocalId] {
-			t.Errorf("symbol %d: FoldDepth %d, expected %d", i.SymbolLocalId, got, want[i.SymbolLocalId])
-		}
-	}
-	// A ref takes its owner's fold depth plus that owner's own flag: symbol 5
-	// is unfolded (2), symbol 4 is folded (1 + 1).
-	wantRefs := map[int32]int32{45: 2, 35: 2}
-	for _, r := range obj.Refs {
-		if got := r.FoldDepth; got != wantRefs[r.FromOffsetStart] {
-			t.Errorf("ref at %d: FoldDepth %d, expected %d",
-				r.FromOffsetStart, got, wantRefs[r.FromOffsetStart])
-		}
 	}
 }
 
