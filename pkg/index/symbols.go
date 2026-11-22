@@ -133,6 +133,11 @@ type ReferenceNames struct {
 	// compares names by suffix anyway.  Empty in an expectation; the matcher
 	// ignores it.
 	FromFile string
+
+	// What the reference says, as the index holds it.  The matcher ignores
+	// both: it compares who refers to whom.
+	Roles    Roles
+	Relation Relation
 }
 
 func NewReferenceNames(from, to string) *ReferenceNames {

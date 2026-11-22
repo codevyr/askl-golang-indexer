@@ -78,14 +78,14 @@ func fixture(t *testing.T) *indexpb.Project {
 	// A ref at offset 0 -- an import sits at the very start of the file, which
 	// is where the file, module and directory instances all start too.
 	if err := idx.AddReference(mainID, at(libPath, 20), "a.Target",
-		at(mainPath, 0), at(mainPath, 6), nil); err != nil {
+		at(mainPath, 0), at(mainPath, 6), nil, NoRole, NoRelation); err != nil {
 		t.Fatalf("AddReference at 0: %v", err)
 	}
 	// A ref deep inside the closure.
 	// With a surrounding construct: `full` encloses the token, which is the
 	// opposite containment from an instance's finer spans.
 	if err := idx.AddReference(mainID, at(libPath, 20), "a.Target",
-		at(mainPath, 70), at(mainPath, 76), NewSpan(70, 80)); err != nil {
+		at(mainPath, 70), at(mainPath, 76), NewSpan(70, 80), NoRole, NoRelation); err != nil {
 		t.Fatalf("AddReference in closure: %v", err)
 	}
 	// A ref that sits in m.Run AFTER the closure inside it has closed, with no
@@ -94,13 +94,13 @@ func fixture(t *testing.T) *indexpb.Project {
 	// this ref -- so an owner lookup that trusts the top of the stack instead
 	// of testing containment attributes it to a variable five levels down.
 	if err := idx.AddReference(mainID, at(libPath, 20), "a.Target",
-		at(mainPath, 100), at(mainPath, 106), nil); err != nil {
+		at(mainPath, 100), at(mainPath, 106), nil, NoRole, NoRelation); err != nil {
 		t.Fatalf("AddReference after closed sibling: %v", err)
 	}
 	// A ref whose range is exactly its owner's: legal, and the case that tells
 	// "place refs before this instance" from "place refs at or before it".
 	if err := idx.AddReference(libID, at(libPath, 20), "a.Target",
-		at(libPath, 20), at(libPath, 70), nil); err != nil {
+		at(libPath, 20), at(libPath, 70), nil, NoRole, NoRelation); err != nil {
 		t.Fatalf("AddReference co-extensive: %v", err)
 	}
 
@@ -545,7 +545,7 @@ func TestRefFullSpanMustContainItsToken(t *testing.T) {
 			InstanceTypeDefinition, pos(10), pos(90), Spans{}, NoParent); err != nil {
 			t.Fatalf("AddSymbol: %v", err)
 		}
-		if err := idx.AddReference(fileID, pos(10), "m.Run", pos(40), pos(45), full); err != nil {
+		if err := idx.AddReference(fileID, pos(10), "m.Run", pos(40), pos(45), full, NoRole, NoRelation); err != nil {
 			t.Fatalf("AddReference: %v", err)
 		}
 		if err := idx.ResolveReferences(); err != nil {
@@ -671,7 +671,7 @@ func TestARefInsideNoInstanceLandsAtTheObjectRoot(t *testing.T) {
 	}
 	// Beyond the file instance's own extent, which is what a //line directive
 	// or a second read of the file can produce.
-	if err := idx.AddReference(fileID, pos(10), "m.Run", pos(150), pos(160), nil); err != nil {
+	if err := idx.AddReference(fileID, pos(10), "m.Run", pos(150), pos(160), nil, NoRole, NoRelation); err != nil {
 		t.Fatalf("AddReference: %v", err)
 	}
 	if err := idx.ResolveReferences(); err != nil {

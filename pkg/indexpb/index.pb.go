@@ -21,6 +21,118 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// One bit per thing a referencing token can do to its target.  A role is
+// what the TEXT does, not what runs: `fn = s->cb; fn()` calls through no
+// callee token, and `*p = x` writes through no token of what it writes.
+type RefRole int32
+
+const (
+	RefRole_REF_ROLE_UNSPECIFIED RefRole = 0
+	// The token is the callee of a call: `foo(x)`, `s->cb(x)`.
+	RefRole_REF_ROLE_CALL RefRole = 1
+	// The target is assigned or initialised: `s->cb = f`, `n++`, `.cb = f`.
+	RefRole_REF_ROLE_WRITE RefRole = 2
+	// Its value or address is taken, not called: `request_irq(n, handler)`,
+	// `g = s->count`, `case REQ_OP_READ:`.
+	RefRole_REF_ROLE_TAKE RefRole = 4
+)
+
+// Enum value maps for RefRole.
+var (
+	RefRole_name = map[int32]string{
+		0: "REF_ROLE_UNSPECIFIED",
+		1: "REF_ROLE_CALL",
+		2: "REF_ROLE_WRITE",
+		4: "REF_ROLE_TAKE",
+	}
+	RefRole_value = map[string]int32{
+		"REF_ROLE_UNSPECIFIED": 0,
+		"REF_ROLE_CALL":        1,
+		"REF_ROLE_WRITE":       2,
+		"REF_ROLE_TAKE":        4,
+	}
+)
+
+func (x RefRole) Enum() *RefRole {
+	p := new(RefRole)
+	*p = x
+	return p
+}
+
+func (x RefRole) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RefRole) Descriptor() protoreflect.EnumDescriptor {
+	return file_proto_index_proto_enumTypes[0].Descriptor()
+}
+
+func (RefRole) Type() protoreflect.EnumType {
+	return &file_proto_index_proto_enumTypes[0]
+}
+
+func (x RefRole) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RefRole.Descriptor instead.
+func (RefRole) EnumDescriptor() ([]byte, []int) {
+	return file_proto_index_proto_rawDescGZIP(), []int{0}
+}
+
+// A fact between two symbols that no token of the source spells.
+type RefRelation int32
+
+const (
+	RefRelation_REF_RELATION_NONE RefRelation = 0
+	// The source's invocation declared the target: `DEFINE_MUTEX -> lock`.
+	RefRelation_REF_RELATION_DECLARES RefRelation = 1
+	// The source is a dispatch point and the target something stored in it:
+	// `file_operations.read -> bt_bmc_read`, `(io.Reader).Read -> (*File).Read`.
+	RefRelation_REF_RELATION_HOLDS RefRelation = 2
+)
+
+// Enum value maps for RefRelation.
+var (
+	RefRelation_name = map[int32]string{
+		0: "REF_RELATION_NONE",
+		1: "REF_RELATION_DECLARES",
+		2: "REF_RELATION_HOLDS",
+	}
+	RefRelation_value = map[string]int32{
+		"REF_RELATION_NONE":     0,
+		"REF_RELATION_DECLARES": 1,
+		"REF_RELATION_HOLDS":    2,
+	}
+)
+
+func (x RefRelation) Enum() *RefRelation {
+	p := new(RefRelation)
+	*p = x
+	return p
+}
+
+func (x RefRelation) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RefRelation) Descriptor() protoreflect.EnumDescriptor {
+	return file_proto_index_proto_enumTypes[1].Descriptor()
+}
+
+func (RefRelation) Type() protoreflect.EnumType {
+	return &file_proto_index_proto_enumTypes[1]
+}
+
+func (x RefRelation) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RefRelation.Descriptor instead.
+func (RefRelation) EnumDescriptor() ([]byte, []int) {
+	return file_proto_index_proto_rawDescGZIP(), []int{1}
+}
+
 type SymbolScope int32
 
 const (
@@ -54,11 +166,11 @@ func (x SymbolScope) String() string {
 }
 
 func (SymbolScope) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_index_proto_enumTypes[0].Descriptor()
+	return file_proto_index_proto_enumTypes[2].Descriptor()
 }
 
 func (SymbolScope) Type() protoreflect.EnumType {
-	return &file_proto_index_proto_enumTypes[0]
+	return &file_proto_index_proto_enumTypes[2]
 }
 
 func (x SymbolScope) Number() protoreflect.EnumNumber {
@@ -67,7 +179,7 @@ func (x SymbolScope) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SymbolScope.Descriptor instead.
 func (SymbolScope) EnumDescriptor() ([]byte, []int) {
-	return file_proto_index_proto_rawDescGZIP(), []int{0}
+	return file_proto_index_proto_rawDescGZIP(), []int{2}
 }
 
 type SymbolType int32
@@ -121,11 +233,11 @@ func (x SymbolType) String() string {
 }
 
 func (SymbolType) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_index_proto_enumTypes[1].Descriptor()
+	return file_proto_index_proto_enumTypes[3].Descriptor()
 }
 
 func (SymbolType) Type() protoreflect.EnumType {
-	return &file_proto_index_proto_enumTypes[1]
+	return &file_proto_index_proto_enumTypes[3]
 }
 
 func (x SymbolType) Number() protoreflect.EnumNumber {
@@ -134,7 +246,7 @@ func (x SymbolType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SymbolType.Descriptor instead.
 func (SymbolType) EnumDescriptor() ([]byte, []int) {
-	return file_proto_index_proto_rawDescGZIP(), []int{1}
+	return file_proto_index_proto_rawDescGZIP(), []int{3}
 }
 
 type InstanceType int32
@@ -197,11 +309,11 @@ func (x InstanceType) String() string {
 }
 
 func (InstanceType) Descriptor() protoreflect.EnumDescriptor {
-	return file_proto_index_proto_enumTypes[2].Descriptor()
+	return file_proto_index_proto_enumTypes[4].Descriptor()
 }
 
 func (InstanceType) Type() protoreflect.EnumType {
-	return &file_proto_index_proto_enumTypes[2]
+	return &file_proto_index_proto_enumTypes[4]
 }
 
 func (x InstanceType) Number() protoreflect.EnumNumber {
@@ -210,7 +322,7 @@ func (x InstanceType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InstanceType.Descriptor instead.
 func (InstanceType) EnumDescriptor() ([]byte, []int) {
-	return file_proto_index_proto_rawDescGZIP(), []int{2}
+	return file_proto_index_proto_rawDescGZIP(), []int{4}
 }
 
 type Project struct {
@@ -792,7 +904,17 @@ type SymbolRef struct {
 	// Position in the same DFS sequence as the instances of this object.  A ref
 	// is a point, not an interval: it is owned by the instance whose
 	// [dfs_enter, dfs_exit] contains this number at depth - 1.
-	DfsEnter      int64 `protobuf:"varint,8,opt,name=dfs_enter,json=dfsEnter,proto3" json:"dfs_enter,omitempty"`
+	DfsEnter int64 `protobuf:"varint,8,opt,name=dfs_enter,json=dfsEnter,proto3" json:"dfs_enter,omitempty"`
+	// What the token does to its target: a SET of RefRole bits, zero meaning
+	// nothing is stated.  Every bit is a positive fact about the text at this
+	// token and an absent bit states nothing, so an index written before roles
+	// existed, a name in a `#define` body, a type reference and a macro
+	// invocation all read the same: "refers to".  Two sightings of one token
+	// merge by union (`n++` is WRITE|TAKE).
+	Roles uint32 `protobuf:"varint,11,opt,name=roles,proto3" json:"roles,omitempty"`
+	// Zero for a reference.  Otherwise this row is not something a token says
+	// but a fact between two symbols, placed on the declaration of its source.
+	Relation      RefRelation `protobuf:"varint,12,opt,name=relation,proto3,enum=askl.index.RefRelation" json:"relation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -869,6 +991,20 @@ func (x *SymbolRef) GetDfsEnter() int64 {
 	return 0
 }
 
+func (x *SymbolRef) GetRoles() uint32 {
+	if x != nil {
+		return x.Roles
+	}
+	return 0
+}
+
+func (x *SymbolRef) GetRelation() RefRelation {
+	if x != nil {
+		return x.Relation
+	}
+	return RefRelation_REF_RELATION_NONE
+}
+
 var File_proto_index_proto protoreflect.FileDescriptor
 
 const file_proto_index_proto_rawDesc = "" +
@@ -916,16 +1052,27 @@ const file_proto_index_proto_rawDesc = "" +
 	"\x04name\x18\b \x01(\v2\x10.askl.index.SpanR\x04name\x12.\n" +
 	"\tsignature\x18\t \x01(\v2\x10.askl.index.SpanR\tsignature\x12*\n" +
 	"\acontent\x18\n" +
-	" \x01(\v2\x10.askl.index.SpanR\acontentJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0f\"\x8c\x02\n" +
+	" \x01(\v2\x10.askl.index.SpanR\acontentJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0f\"\xd7\x02\n" +
 	"\tSymbolRef\x12+\n" +
 	"\x12to_symbol_local_id\x18\x01 \x01(\x03R\x0ftoSymbolLocalId\x12*\n" +
 	"\x11from_offset_start\x18\x02 \x01(\x05R\x0ffromOffsetStart\x12&\n" +
 	"\x0ffrom_offset_end\x18\x03 \x01(\x05R\rfromOffsetEnd\x12$\n" +
 	"\x04full\x18\x06 \x01(\v2\x10.askl.index.SpanR\x04full\x12#\n" +
 	"\rnesting_level\x18\a \x01(\x05R\fnestingLevel\x12\x1b\n" +
-	"\tdfs_enter\x18\b \x01(\x03R\bdfsEnterJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\t\x10\n" +
+	"\tdfs_enter\x18\b \x01(\x03R\bdfsEnter\x12\x14\n" +
+	"\x05roles\x18\v \x01(\rR\x05roles\x123\n" +
+	"\brelation\x18\f \x01(\x0e2\x17.askl.index.RefRelationR\brelationJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\t\x10\n" +
 	"J\x04\b\n" +
-	"\x10\v*B\n" +
+	"\x10\v*]\n" +
+	"\aRefRole\x12\x18\n" +
+	"\x14REF_ROLE_UNSPECIFIED\x10\x00\x12\x11\n" +
+	"\rREF_ROLE_CALL\x10\x01\x12\x12\n" +
+	"\x0eREF_ROLE_WRITE\x10\x02\x12\x11\n" +
+	"\rREF_ROLE_TAKE\x10\x04*W\n" +
+	"\vRefRelation\x12\x15\n" +
+	"\x11REF_RELATION_NONE\x10\x00\x12\x19\n" +
+	"\x15REF_RELATION_DECLARES\x10\x01\x12\x16\n" +
+	"\x12REF_RELATION_HOLDS\x10\x02*B\n" +
 	"\vSymbolScope\x12\x1c\n" +
 	"\x18SYMBOL_SCOPE_UNSPECIFIED\x10\x00\x12\t\n" +
 	"\x05LOCAL\x10\x01\x12\n" +
@@ -972,39 +1119,42 @@ func file_proto_index_proto_rawDescGZIP() []byte {
 	return file_proto_index_proto_rawDescData
 }
 
-var file_proto_index_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_proto_index_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
 var file_proto_index_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_proto_index_proto_goTypes = []any{
-	(SymbolScope)(0),       // 0: askl.index.SymbolScope
-	(SymbolType)(0),        // 1: askl.index.SymbolType
-	(InstanceType)(0),      // 2: askl.index.InstanceType
-	(*Project)(nil),        // 3: askl.index.Project
-	(*Object)(nil),         // 4: askl.index.Object
-	(*ObjectContent)(nil),  // 5: askl.index.ObjectContent
-	(*ContentBatch)(nil),   // 6: askl.index.ContentBatch
-	(*Symbol)(nil),         // 7: askl.index.Symbol
-	(*Span)(nil),           // 8: askl.index.Span
-	(*SymbolInstance)(nil), // 9: askl.index.SymbolInstance
-	(*SymbolRef)(nil),      // 10: askl.index.SymbolRef
+	(RefRole)(0),           // 0: askl.index.RefRole
+	(RefRelation)(0),       // 1: askl.index.RefRelation
+	(SymbolScope)(0),       // 2: askl.index.SymbolScope
+	(SymbolType)(0),        // 3: askl.index.SymbolType
+	(InstanceType)(0),      // 4: askl.index.InstanceType
+	(*Project)(nil),        // 5: askl.index.Project
+	(*Object)(nil),         // 6: askl.index.Object
+	(*ObjectContent)(nil),  // 7: askl.index.ObjectContent
+	(*ContentBatch)(nil),   // 8: askl.index.ContentBatch
+	(*Symbol)(nil),         // 9: askl.index.Symbol
+	(*Span)(nil),           // 10: askl.index.Span
+	(*SymbolInstance)(nil), // 11: askl.index.SymbolInstance
+	(*SymbolRef)(nil),      // 12: askl.index.SymbolRef
 }
 var file_proto_index_proto_depIdxs = []int32{
-	4,  // 0: askl.index.Project.objects:type_name -> askl.index.Object
-	7,  // 1: askl.index.Project.symbols:type_name -> askl.index.Symbol
-	9,  // 2: askl.index.Object.symbol_instances:type_name -> askl.index.SymbolInstance
-	10, // 3: askl.index.Object.refs:type_name -> askl.index.SymbolRef
-	5,  // 4: askl.index.ContentBatch.contents:type_name -> askl.index.ObjectContent
-	0,  // 5: askl.index.Symbol.scope:type_name -> askl.index.SymbolScope
-	1,  // 6: askl.index.Symbol.type:type_name -> askl.index.SymbolType
-	2,  // 7: askl.index.SymbolInstance.instance_type:type_name -> askl.index.InstanceType
-	8,  // 8: askl.index.SymbolInstance.name:type_name -> askl.index.Span
-	8,  // 9: askl.index.SymbolInstance.signature:type_name -> askl.index.Span
-	8,  // 10: askl.index.SymbolInstance.content:type_name -> askl.index.Span
-	8,  // 11: askl.index.SymbolRef.full:type_name -> askl.index.Span
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	6,  // 0: askl.index.Project.objects:type_name -> askl.index.Object
+	9,  // 1: askl.index.Project.symbols:type_name -> askl.index.Symbol
+	11, // 2: askl.index.Object.symbol_instances:type_name -> askl.index.SymbolInstance
+	12, // 3: askl.index.Object.refs:type_name -> askl.index.SymbolRef
+	7,  // 4: askl.index.ContentBatch.contents:type_name -> askl.index.ObjectContent
+	2,  // 5: askl.index.Symbol.scope:type_name -> askl.index.SymbolScope
+	3,  // 6: askl.index.Symbol.type:type_name -> askl.index.SymbolType
+	4,  // 7: askl.index.SymbolInstance.instance_type:type_name -> askl.index.InstanceType
+	10, // 8: askl.index.SymbolInstance.name:type_name -> askl.index.Span
+	10, // 9: askl.index.SymbolInstance.signature:type_name -> askl.index.Span
+	10, // 10: askl.index.SymbolInstance.content:type_name -> askl.index.Span
+	10, // 11: askl.index.SymbolRef.full:type_name -> askl.index.Span
+	1,  // 12: askl.index.SymbolRef.relation:type_name -> askl.index.RefRelation
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_proto_index_proto_init() }
@@ -1017,7 +1167,7 @@ func file_proto_index_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_index_proto_rawDesc), len(file_proto_index_proto_rawDesc)),
-			NumEnums:      3,
+			NumEnums:      5,
 			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
