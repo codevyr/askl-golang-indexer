@@ -133,26 +133,138 @@ func (f *FileParser) recordFuncLitVar(ident *ast.Ident, fl *ast.FuncLit) {
 	}
 }
 
-// Find function calls and anonymous functions in a given function body
-func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStmt, parentFullName string) (err error) {
+// nameToken is the identifier that names what `e` denotes: `f` in `f`, `Read`
+// in `r.Read` and in `pkg.Read`.  nil where `e` is not a name.
+func nameToken(e ast.Expr) *ast.Ident {
+	switch e := e.(type) {
+	case *ast.Ident:
+		return e
+	case *ast.SelectorExpr:
+		return e.Sel
+	}
+	return nil
+}
+
+// calleeToken is the token a call calls: the name in `f(x)` and `r.Read(p)`,
+// and the generic function's name in `pick[int](x)`, which is a call of `pick`
+// through its instantiation.  nil where no token is the callee: `fns[i](x)`
+// calls an element, `mk()(x)` a result.
+func (f *FileParser) calleeToken(fun ast.Expr) *ast.Ident {
+	fun = ast.Unparen(fun)
+	var instantiated ast.Expr
+	switch e := fun.(type) {
+	case *ast.IndexExpr:
+		instantiated = e.X
+	case *ast.IndexListExpr:
+		instantiated = e.X
+	default:
+		return nameToken(fun)
+	}
+	if name := nameToken(instantiated); name != nil {
+		if _, isFunc := f.pkg.TypesInfo.Uses[name].(*types.Func); isFunc {
+			return name
+		}
+	}
+	return nil
+}
+
+// storageToken is the token of the variable that `target`, the place an
+// assignment stores into, is PART OF.
+//
+// A FIELD OR AN ARRAY ELEMENT OF A VARIABLE IS INSIDE IT; WHAT A POINTER, A
+// SLICE OR A MAP LEADS TO IS SOMEWHERE ELSE.  `cfg.Debug = true` and
+// `sizes[0] = 1` (an array) change `cfg` and `sizes`, so the token is written.
+// `names["a"] = 1` and `p.next = q` change something the variable only leads
+// to: the variable is read to find the place, and nothing writes it.
+func (f *FileParser) storageToken(target ast.Expr) *ast.Ident {
+	for {
+		switch e := ast.Unparen(target).(type) {
+		case *ast.Ident:
+			return e
+		case *ast.SelectorExpr:
+			selection, selects := f.pkg.TypesInfo.Selections[e]
+			if !selects {
+				return e.Sel // a qualified identifier: `pkg.Var`
+			}
+			if selection.Kind() != types.FieldVal || selection.Indirect() {
+				return nil
+			}
+			target = e.X
+		case *ast.IndexExpr:
+			of := f.pkg.TypesInfo.TypeOf(e.X)
+			if of == nil {
+				return nil
+			}
+			if _, isArray := of.Underlying().(*types.Array); !isArray {
+				return nil
+			}
+			target = e.X
+		default:
+			return nil
+		}
+	}
+}
+
+// functionBodyParser finds the references and the function literals in a
+// function's body.
+func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStmt, parentFullName string) error {
 	if body == nil {
-		return
+		return nil
+	}
+	return f.codeParser(parser, body, parentFullName, index.NoParent)
+}
+
+// codeParser finds the references and the function literals in a piece of
+// code: a function's body, or the initialiser of a package-level declaration.
+//
+// `literalParent` states where a function literal found here belongs in the
+// containment tree (see funcLitParser).
+func (f *FileParser) codeParser(parser *ParsingStage, code ast.Node, parentFullName string,
+	literalParent index.SymbolInstanceId) (err error) {
+	// WHAT A TOKEN DOES IS SAID BY THE CONSTRUCT AROUND IT.  ast.Inspect visits
+	// a construct before its parts, so by the time the identifier handler below
+	// reaches `inner` in `inner(1)` or `Count` in `Count++`, the call or the
+	// statement around it has said what it is there.
+	//
+	// The tokens that are the callee of a call.
+	callees := map[*ast.Ident]struct{}{}
+	// The tokens of the variables an assignment stores into, with what the
+	// assignment does to them: `=` writes; `+=` and `++` read what they write.
+	stored := map[*ast.Ident]index.Roles{}
+	stores := func(target ast.Expr, roles index.Roles) {
+		if target == nil {
+			return
+		}
+		if name := f.storageToken(target); name != nil {
+			stored[name] |= roles
+		}
 	}
 
-	// The identifiers that are the callee of a call.  ast.Inspect visits a call
-	// before the expression it calls, so by the time the identifier handler
-	// below reaches `inner` in `inner(1)` the call around it has said so.
-	callees := map[*ast.Ident]struct{}{}
-
-	ast.Inspect(body, func(n ast.Node) bool {
+	ast.Inspect(code, func(n ast.Node) bool {
 		if err != nil {
 			return false
 		}
 
-		if callExpr, ok := n.(*ast.CallExpr); ok {
-			if callee, ok := callExpr.Fun.(*ast.Ident); ok {
+		switch node := n.(type) {
+		case *ast.CallExpr:
+			if callee := f.calleeToken(node.Fun); callee != nil {
 				callees[callee] = struct{}{}
 			}
+		case *ast.AssignStmt:
+			roles := index.RoleWrite
+			if node.Tok != token.ASSIGN && node.Tok != token.DEFINE {
+				roles |= index.RoleTake
+			}
+			for _, target := range node.Lhs {
+				stores(target, roles)
+			}
+		case *ast.IncDecStmt:
+			stores(node.X, index.RoleWrite|index.RoleTake)
+		case *ast.RangeStmt:
+			// `for Count = range xs`.  With `:=` the names are new, and
+			// nobody's.
+			stores(node.Key, index.RoleWrite)
+			stores(node.Value, index.RoleWrite)
 		}
 
 		// Track variable assignments to FuncLit for resolving calls like inner(1)
@@ -177,7 +289,7 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 
 		// Handle anonymous function literals (nested functions)
 		if funcLit, ok := n.(*ast.FuncLit); ok {
-			err = f.funcLitParser(parser, funcLit, parentFullName, index.NoParent)
+			err = f.funcLitParser(parser, funcLit, parentFullName, literalParent)
 			if err != nil {
 				return false
 			}
@@ -204,10 +316,27 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 			return recurse
 		}
 
-		// Handle identifier references to package-level variables, constants, and
-		// variables holding anonymous functions (FuncLit vars).  The CallExpr
-		// handler below skips *types.Var, so all var/const ident refs are resolved here.
+		// An identifier that names a function, a package-level variable or
+		// constant, or a variable holding a function literal.
 		if ident, ok := n.(*ast.Ident); ok {
+			_, called := callees[ident]
+			storing, isStored := stored[ident]
+
+			// A FUNCTION NAMED AND NOT CALLED IS TAKEN: passed, assigned,
+			// returned, stored in a literal, or a method value (`r.Read`) or
+			// expression (`T.Read`).  The callee of a call is the call
+			// handler's below.  `Uses`, not ObjectOf: the name of an interface
+			// method where it is declared is no use of it.
+			if fn, isFunc := f.pkg.TypesInfo.Uses[ident].(*types.Func); isFunc {
+				if !called {
+					err = f.addFunctionValueRef(fn, ident)
+					if err != nil {
+						return false
+					}
+				}
+				return true
+			}
+
 			if obj := f.pkg.TypesInfo.ObjectOf(ident); obj != nil {
 				if varObj, isVar := obj.(*types.Var); isVar {
 					// Check if this var holds a FuncLit (anonymous function)
@@ -219,11 +348,16 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 								varPos := f.pkg.Fset.Position(obj.Pos())
 								start := f.pkg.Fset.Position(ident.Pos())
 								end := f.pkg.Fset.Position(ident.End())
-								// `inner(1)` calls the function `inner` names;
-								// `apply(inner)` hands it over, and of that
+								// THE VARIABLE STANDS FOR THE FUNCTION IT NAMES
+								// where it is used: `inner(1)` calls it and
+								// `apply(inner)` takes it.  Where the variable
+								// is assigned (`inner = other`) the token is
+								// the variable itself, and of the function
 								// nothing is stated.
-								roles := index.NoRole
-								if _, called := callees[ident]; called {
+								roles := index.RoleTake
+								if isStored {
+									roles = index.NoRole
+								} else if called {
 									roles = index.RoleCall
 								}
 								err = f.index.AddReference(f.fileId, varPos, funcName, start, end, nil, roles, index.NoRelation)
@@ -237,13 +371,24 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 					}
 					// If not a FuncLit var, check for package-level variable reference
 					if !handled && !varObj.IsField() {
-						err = f.addPackageLevelDataRef(obj, ident)
+						// PACKAGE-LEVEL DATA IS WRITTEN, CALLED OR READ, AND
+						// THE CONSTRUCT AROUND THE TOKEN SAYS WHICH.  Anything
+						// that is neither a store nor a call takes its value
+						// or its address.
+						roles := index.RoleTake
+						if isStored {
+							roles = storing
+						} else if called {
+							roles = index.RoleCall
+						}
+						err = f.addPackageLevelDataRef(obj, ident, roles)
 						if err != nil {
 							return false
 						}
 					}
 				} else if _, isConst := obj.(*types.Const); isConst {
-					err = f.addPackageLevelDataRef(obj, ident)
+					// A constant can only be read.
+					err = f.addPackageLevelDataRef(obj, ident, index.RoleTake)
 					if err != nil {
 						return false
 					}
@@ -268,19 +413,19 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 			case *ast.FuncLit:
 				// Will be handled by top-level FuncLit case when Inspect descends
 				return true
-			case *ast.ParenExpr:
-				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
-				return true
+			case *ast.ParenExpr, *ast.IndexExpr, *ast.IndexListExpr:
+				// `(f)(x)` calls `f`, and `pick[int](x)` calls `pick`; an
+				// element (`fns[i](x)`) or a conversion (`(*T)(x)`) has no
+				// callee token.
+				ident = f.calleeToken(fun)
+				if ident == nil {
+					logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
+					return true
+				}
 			case *ast.CallExpr:
 				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
 				return true
 			case *ast.TypeAssertExpr:
-				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
-				return true
-			case *ast.IndexExpr:
-				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
-				return true
-			case *ast.IndexListExpr:
 				logging.Debugf("Unimplemented: %T %s %s", fun, start, end)
 				return true
 			case *ast.ChanType:
@@ -378,6 +523,19 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 	})
 
 	return
+}
+
+// addFunctionValueRef emits a reference from the token `ident` to the function
+// it names, stating that the function is taken there and not called.
+func (f *FileParser) addFunctionValueRef(fn *types.Func, ident *ast.Ident) error {
+	// A function of the universe (`error.Error`) has no position; a call of
+	// one produces no reference either.
+	if !fn.Pos().IsValid() {
+		return nil
+	}
+	return f.index.AddReference(f.fileId, f.pkg.Fset.Position(fn.Pos()), fn.Origin().FullName(),
+		f.pkg.Fset.Position(ident.Pos()), f.pkg.Fset.Position(ident.End()),
+		nil, index.RoleTake, index.NoRelation)
 }
 
 // funcLitParser adds a function literal's symbol and walks its body.
@@ -768,8 +926,9 @@ func isPackageLevelValue(obj types.Object, pkgScope *types.Scope) bool {
 }
 
 // addPackageLevelDataRef emits a reference from the current file to a
-// package-level variable or constant identified by obj, at the use-site ident.
-func (f *FileParser) addPackageLevelDataRef(obj types.Object, ident *ast.Ident) error {
+// package-level variable or constant identified by obj, at the use-site ident,
+// stating what the token does to it there.
+func (f *FileParser) addPackageLevelDataRef(obj types.Object, ident *ast.Ident, roles index.Roles) error {
 	if obj.Pkg() == nil || obj.Parent() == nil || obj.Parent() != obj.Pkg().Scope() {
 		return nil
 	}
@@ -777,7 +936,7 @@ func (f *FileParser) addPackageLevelDataRef(obj types.Object, ident *ast.Ident) 
 	defPos := f.pkg.Fset.Position(obj.Pos())
 	useStart := f.pkg.Fset.Position(ident.Pos())
 	useEnd := f.pkg.Fset.Position(ident.End())
-	return f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, index.NoRole, index.NoRelation)
+	return f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, roles, index.NoRelation)
 }
 
 // valueDeclParser extracts package-level variable or constant declarations as
@@ -790,6 +949,8 @@ func (f *FileParser) valueDeclParser(parser *ParsingStage, gd *ast.GenDecl) erro
 			continue
 		}
 		hasPackageLevelValue := false
+		// The initialisers a name of this spec claimed for itself, below.
+		claimed := map[int]struct{}{}
 		for nameIdx, name := range vs.Names {
 			if name.Name == "_" {
 				continue // skip blank identifier
@@ -843,7 +1004,8 @@ func (f *FileParser) valueDeclParser(parser *ParsingStage, gd *ast.GenDecl) erro
 			// `var First, Second = f1, f2` gives both names one range, so no
 			// extent distinguishes f1 from f2.
 			if len(vs.Values) == len(vs.Names) {
-				if err := f.initialiserFuncLits(parser, vs.Values[nameIdx], fullName, instanceID); err != nil {
+				claimed[nameIdx] = struct{}{}
+				if err := f.codeParser(parser, vs.Values[nameIdx], fullName, instanceID); err != nil {
 					return err
 				}
 			}
@@ -855,6 +1017,20 @@ func (f *FileParser) valueDeclParser(parser *ParsingStage, gd *ast.GenDecl) erro
 			f.addDocInstance(fullName, symbolScope, index.SymbolTypeData, doc)
 			hasPackageLevelValue = true
 		}
+		// AN INITIALISER IS CODE.  `var handlers = map[string]Handler{"a": run}`
+		// takes `run` and `var limit = compute()` calls `compute` exactly as a
+		// function body would, and neither used to be read at all.  The
+		// initialisers no name claimed (`var _ = register(run)`, and
+		// `var a, b = pair()`, which is one value for two names) belong to the
+		// package, as a function literal in them always did.
+		for valueIdx, value := range vs.Values {
+			if _, done := claimed[valueIdx]; done {
+				continue
+			}
+			if err := f.codeParser(parser, value, f.pkg.PkgPath, index.NoParent); err != nil {
+				return err
+			}
+		}
 		// If this ValueSpec has an explicit type annotation and at least one
 		// package-level value was added, emit DATA→TYPE references once per spec.
 		if hasPackageLevelValue && vs.Type != nil {
@@ -864,33 +1040,6 @@ func (f *FileParser) valueDeclParser(parser *ParsingStage, gd *ast.GenDecl) erro
 		}
 	}
 	return nil
-}
-
-// initialiserFuncLits parses the function literals directly inside one
-// declaration's initialiser, stating that the declared symbol owns them.
-//
-// Without this they would be numbered wherever their RANGE puts them, which for
-// a grouped declaration is "inside whichever name the sort order reached last"
-// -- measured on `var First, Second = func(){...}, func(){...}`:
-// `First { ... }` found nothing and `Second { ... }` found both closures.
-func (f *FileParser) initialiserFuncLits(parser *ParsingStage, expr ast.Expr,
-	ownerName string, owner index.SymbolInstanceId) error {
-	var err error
-	ast.Inspect(expr, func(n ast.Node) bool {
-		if err != nil {
-			return false
-		}
-		lit, ok := n.(*ast.FuncLit)
-		if !ok {
-			return true
-		}
-		if _, done := f.anonFuncByPos[f.pkg.Fset.Position(lit.Pos()).Offset]; done {
-			return false
-		}
-		err = f.funcLitParser(parser, lit, ownerName, owner)
-		return false // funcLitParser walks the body, including nested literals
-	})
-	return err
 }
 
 func (f *FileParser) Parse(parser *ParsingStage) (err error) {
