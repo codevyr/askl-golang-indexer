@@ -573,6 +573,8 @@ var _ = Describe("PackageParser", func() {
 				index.NewReferenceNames("assign_interface.GlobalTypes", "assign_interface.Types"),
 				// FUNC->DATA: MockFunction uses GlobalTypes
 				index.NewReferenceNames("assign_interface.MockFunction", "assign_interface.GlobalTypes"),
+				// DATA->FUNC: an initialiser is code, and `new(Types)` is a call in it
+				index.NewReferenceNames("assign_interface.GlobalTypes", "builtin.new"),
 			},
 		),
 		Entry("assign a func to any", "assign_func",
@@ -729,6 +731,8 @@ var _ = Describe("PackageParser", func() {
 			},
 			[]*index.ReferenceNames{
 				index.NewReferenceNames("func_as_param.CallInterface", "builtin.print"),
+				// FUNC->FUNC: `HandlerFunc(foo.Foo)` takes the method as a value
+				index.NewReferenceNames("func_as_param.CallInterface", "func_as_param.FooType).Foo"),
 				// TYPE->FUNCTION: receiver method
 				index.NewReferenceNames("func_as_param.FooType", "func_as_param.FooType).Foo"),
 				// TYPE->TYPE: HandlerFunc func type references ResponseWriter and Request
