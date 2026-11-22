@@ -55,6 +55,8 @@ type referenceLog struct {
 	start    token.Position
 	end      token.Position
 	full     *Span
+	roles    Roles
+	relation Relation
 }
 
 // moduleImportLog tracks module-to-module import relationships
@@ -939,7 +941,7 @@ func (i *ProtoIndex) FindBuiltinInstance(name string) (FileId, token.Position, t
 	return FileId(-1), token.Position{}, token.Position{}, fmt.Errorf("builtin instance not found for %s", name)
 }
 
-func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position, full *Span) error {
+func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position, full *Span, roles Roles, relation Relation) error {
 	// Reject start positions that are completely empty (zero-value struct).
 	// Positions with a filename but Line=0 are allowed — this occurs for
 	// compiler-provided packages like builtin/unsafe.
@@ -964,6 +966,8 @@ func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string,
 		start:    start,
 		end:      end,
 		full:     full,
+		roles:    roles,
+		relation: relation,
 	})
 
 	return nil
@@ -973,7 +977,11 @@ func (i *ProtoIndex) ResolveReferences() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	seen := make(map[refDedupKey]struct{})
+	// SIGHTINGS OF ONE TOKEN MERGE BY UNION.  The key is one token referring to
+	// one symbol, so a second sighting adds no row; what it says is added to
+	// the row the first one made.  Every role is a positive fact, so the union
+	// loses nothing and does not depend on which sighting came first.
+	seen := make(map[refDedupKey]*indexpb.SymbolRef)
 	for _, ref := range i.referencesLog {
 		key := fileNameKey{filePath: ref.to.Filename, name: ref.toName}
 		toSymbolID, ok := i.symbolByFileAndName[key]
@@ -1005,17 +1013,32 @@ func (i *ProtoIndex) ResolveReferences() error {
 			start:      int32(ref.start.Offset),
 			end:        int32(ref.end.Offset),
 		}
-		if _, ok := seen[dedupKey]; ok {
+		if row, ok := seen[dedupKey]; ok {
+			row.Roles |= uint32(ref.roles)
+			if Relation(row.Relation) != ref.relation {
+				// A row is a use or a relation, and the key has room for one.
+				// No site writes both at one token; if one ever does, the
+				// relation stays, because nothing else can say it.
+				logging.Warnf("reference to %s at %s:%d is both %s and %s",
+					ref.toName, ref.start.Filename, ref.start.Offset,
+					Relation(row.Relation), ref.relation)
+				if row.Relation == indexpb.RefRelation_REF_RELATION_NONE {
+					row.Relation = indexpb.RefRelation(ref.relation)
+				}
+			}
 			continue
 		}
-		seen[dedupKey] = struct{}{}
 
-		file.Refs = append(file.Refs, &indexpb.SymbolRef{
+		row := &indexpb.SymbolRef{
 			ToSymbolLocalId: toSymbolID,
 			FromOffsetStart: int32(ref.start.Offset),
 			FromOffsetEnd:   int32(ref.end.Offset),
-			Full: refFullSpan(ref),
-		})
+			Full:            refFullSpan(ref),
+			Roles:           uint32(ref.roles),
+			Relation:        indexpb.RefRelation(ref.relation),
+		}
+		seen[dedupKey] = row
+		file.Refs = append(file.Refs, row)
 	}
 
 	i.referencesLog = nil
@@ -1081,6 +1104,8 @@ func (i *ProtoIndex) GetAllReferencesNames() ([]*ReferenceNames, error) {
 					From:     fromName,
 					To:       toName,
 					FromFile: filePath,
+					Roles:    Roles(ref.Roles),
+					Relation: Relation(ref.Relation),
 				})
 			}
 

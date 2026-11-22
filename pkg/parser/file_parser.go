@@ -139,9 +139,20 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 		return
 	}
 
+	// The identifiers that are the callee of a call.  ast.Inspect visits a call
+	// before the expression it calls, so by the time the identifier handler
+	// below reaches `inner` in `inner(1)` the call around it has said so.
+	callees := map[*ast.Ident]struct{}{}
+
 	ast.Inspect(body, func(n ast.Node) bool {
 		if err != nil {
 			return false
+		}
+
+		if callExpr, ok := n.(*ast.CallExpr); ok {
+			if callee, ok := callExpr.Fun.(*ast.Ident); ok {
+				callees[callee] = struct{}{}
+			}
 		}
 
 		// Track variable assignments to FuncLit for resolving calls like inner(1)
@@ -208,7 +219,14 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 								varPos := f.pkg.Fset.Position(obj.Pos())
 								start := f.pkg.Fset.Position(ident.Pos())
 								end := f.pkg.Fset.Position(ident.End())
-								err = f.index.AddReference(f.fileId, varPos, funcName, start, end, nil)
+								// `inner(1)` calls the function `inner` names;
+								// `apply(inner)` hands it over, and of that
+								// nothing is stated.
+								roles := index.NoRole
+								if _, called := callees[ident]; called {
+									roles = index.RoleCall
+								}
+								err = f.index.AddReference(f.fileId, varPos, funcName, start, end, nil, roles, index.NoRelation)
 								if err != nil {
 									return false
 								}
@@ -348,8 +366,10 @@ func (f *FileParser) functionBodyParser(parser *ParsingStage, body *ast.BlockStm
 			// "name".
 			tokStart := f.pkg.Fset.Position(ident.Pos())
 			tokEnd := f.pkg.Fset.Position(ident.End())
+			// The token is the callee of a call, whatever it names: a
+			// function, a method, an interface's method, a builtin.
 			err = f.index.AddReference(f.fileId, pos, call, tokStart, tokEnd,
-				index.NewSpan(start.Offset, end.Offset))
+				index.NewSpan(start.Offset, end.Offset), index.RoleCall, index.NoRelation)
 			if err != nil {
 				return false
 			}
@@ -532,7 +552,7 @@ func (f *FileParser) addTypeRefs(parser *ParsingStage, refs []typeRef) {
 			continue
 		}
 		fullName := typeFullName(ref.typeName)
-		if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil); addErr != nil {
+		if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, index.NoRole, index.NoRelation); addErr != nil {
 			logging.Errorf("Failed to add type reference: %v", addErr)
 		}
 	}
@@ -572,7 +592,7 @@ func (f *FileParser) addBuiltinTypeRefs(parser *ParsingStage, exprs ...ast.Expr)
 			}
 			useStart := f.pkg.Fset.Position(n.Pos())
 			useEnd := f.pkg.Fset.Position(n.End())
-			if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil); addErr != nil {
+			if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, index.NoRole, index.NoRelation); addErr != nil {
 				logging.Errorf("Failed to add builtin type reference: %v", addErr)
 			}
 		case *ast.StarExpr:
@@ -709,8 +729,9 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, pare
 					return false, fmt.Errorf("failed to add interface method symbol %s: %w", methodFullName, err)
 				}
 
-				// TYPE->FIELD reference: from_offset at the type name position
-				if addErr := f.index.AddReference(f.fileId, methodStart, methodFullName, typeNameStart, typeNameEnd, nil); addErr != nil {
+				// TYPE->FIELD reference: from_offset at the type name position.
+				// Membership, like TYPE->FUNCTION: it states nothing.
+				if addErr := f.index.AddReference(f.fileId, methodStart, methodFullName, typeNameStart, typeNameEnd, nil, index.NoRole, index.NoRelation); addErr != nil {
 					logging.Errorf("Failed to add TYPE->FIELD reference: %v", addErr)
 				}
 			}
@@ -756,7 +777,7 @@ func (f *FileParser) addPackageLevelDataRef(obj types.Object, ident *ast.Ident) 
 	defPos := f.pkg.Fset.Position(obj.Pos())
 	useStart := f.pkg.Fset.Position(ident.Pos())
 	useEnd := f.pkg.Fset.Position(ident.End())
-	return f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil)
+	return f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, index.NoRole, index.NoRelation)
 }
 
 // valueDeclParser extracts package-level variable or constant declarations as

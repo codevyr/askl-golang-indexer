@@ -125,7 +125,12 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 					}
 				}
 
-				err = f.index.AddReference(fileId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethodName, start, end, nil)
+				// AN INTERFACE METHOD HOLDS THE METHODS THAT SATISFY IT.  No
+				// token says so -- the binding is an assignment somewhere
+				// else -- so the row is a relation, written at the method's
+				// own name, which is inside the method's instance and inside
+				// nothing narrower: the row belongs to the method alone.
+				err = f.index.AddReference(fileId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethodName, start, end, nil, index.NoRole, index.RelationHolds)
 				if err != nil {
 					return fmt.Errorf("failed to add reference: %w", err)
 				}

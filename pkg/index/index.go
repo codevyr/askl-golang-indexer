@@ -176,7 +176,11 @@ type Index interface {
 	// construct around it.  A reference is a point in the containment order, not
 	// an interval, so these ranges are what order and display it; they never
 	// decide what contains it.
-	AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position, full *Span) error
+	//
+	// roles says what the token does to its target (NoRole: nothing is
+	// stated), and relation makes the row a fact between two symbols instead
+	// of a use (NoRelation: an ordinary reference).  See Roles and Relation.
+	AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position, full *Span, roles Roles, relation Relation) error
 	ResolveReferences() error
 	GetAllReferencesNames() ([]*ReferenceNames, error)
 
