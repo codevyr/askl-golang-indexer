@@ -236,7 +236,7 @@ func (p *Parser) resolveDeferredRefs() error {
 		// It is membership, not a use and not a relation of its own yet, so
 		// it states nothing.
 		typeNameEnd := ref.pkg.Fset.Position(ref.typeName.Pos() + token.Pos(len(ref.typeName.Name())))
-		err = p.index.AddReference(typeFileId, ref.methodPos, ref.methodFullName, typeDefPos, typeNameEnd, nil, index.NoRole, index.NoRelation)
+		err = p.index.AddReference(typeFileId, ref.methodPos, ref.methodFullName, typeDefPos, typeNameEnd, nil, index.NoRole)
 		if err != nil {
 			logging.Errorf("Failed to add receiver ref %s -> %s: %v", typeFullName, ref.methodFullName, err)
 		}
@@ -255,7 +255,7 @@ func (p *Parser) resolveDeferredRefs() error {
 			continue
 		}
 		fullName := typeFullName(ref.typeName)
-		if err := p.index.AddReference(ref.fromFileId, defPos, fullName, ref.useStart, ref.useEnd, nil, index.NoRole, index.NoRelation); err != nil {
+		if err := p.index.AddReference(ref.fromFileId, defPos, fullName, ref.useStart, ref.useEnd, nil, index.NoRole); err != nil {
 			logging.Errorf("Failed to add deferred type ref -> %s: %v", fullName, err)
 		}
 	}

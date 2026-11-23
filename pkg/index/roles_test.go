@@ -47,8 +47,17 @@ func TestSightingsOfOneTokenMergeByUnion(t *testing.T) {
 			t.Fatalf("AddSymbol: %v", err)
 		}
 		for _, s := range sightings {
+			if s.relation != NoRelation {
+				// A relation is added with the place that made it so; where
+				// that is has no part in which row it is.
+				if err := idx.AddRelation(fileID, pos(10), "m.Run", pos(s.start), pos(s.end),
+					s.relation, Place{File: fileID, Start: 60, End: 70}); err != nil {
+					t.Fatalf("AddRelation: %v", err)
+				}
+				continue
+			}
 			if err := idx.AddReference(fileID, pos(10), "m.Run", pos(s.start), pos(s.end), nil,
-				s.roles, s.relation); err != nil {
+				s.roles); err != nil {
 				t.Fatalf("AddReference: %v", err)
 			}
 		}

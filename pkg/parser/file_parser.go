@@ -360,7 +360,7 @@ func (f *FileParser) codeParser(parser *ParsingStage, code ast.Node, parentFullN
 								} else if called {
 									roles = index.RoleCall
 								}
-								err = f.index.AddReference(f.fileId, varPos, funcName, start, end, nil, roles, index.NoRelation)
+								err = f.index.AddReference(f.fileId, varPos, funcName, start, end, nil, roles)
 								if err != nil {
 									return false
 								}
@@ -514,7 +514,7 @@ func (f *FileParser) codeParser(parser *ParsingStage, code ast.Node, parentFullN
 			// The token is the callee of a call, whatever it names: a
 			// function, a method, an interface's method, a builtin.
 			err = f.index.AddReference(f.fileId, pos, call, tokStart, tokEnd,
-				index.NewSpan(start.Offset, end.Offset), index.RoleCall, index.NoRelation)
+				index.NewSpan(start.Offset, end.Offset), index.RoleCall)
 			if err != nil {
 				return false
 			}
@@ -535,7 +535,7 @@ func (f *FileParser) addFunctionValueRef(fn *types.Func, ident *ast.Ident) error
 	}
 	return f.index.AddReference(f.fileId, f.pkg.Fset.Position(fn.Pos()), fn.Origin().FullName(),
 		f.pkg.Fset.Position(ident.Pos()), f.pkg.Fset.Position(ident.End()),
-		nil, index.RoleTake, index.NoRelation)
+		nil, index.RoleTake)
 }
 
 // funcLitParser adds a function literal's symbol and walks its body.
@@ -710,7 +710,7 @@ func (f *FileParser) addTypeRefs(parser *ParsingStage, refs []typeRef) {
 			continue
 		}
 		fullName := typeFullName(ref.typeName)
-		if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, index.NoRole, index.NoRelation); addErr != nil {
+		if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, index.NoRole); addErr != nil {
 			logging.Errorf("Failed to add type reference: %v", addErr)
 		}
 	}
@@ -750,7 +750,7 @@ func (f *FileParser) addBuiltinTypeRefs(parser *ParsingStage, exprs ...ast.Expr)
 			}
 			useStart := f.pkg.Fset.Position(n.Pos())
 			useEnd := f.pkg.Fset.Position(n.End())
-			if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, index.NoRole, index.NoRelation); addErr != nil {
+			if addErr := f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, index.NoRole); addErr != nil {
 				logging.Errorf("Failed to add builtin type reference: %v", addErr)
 			}
 		case *ast.StarExpr:
@@ -889,7 +889,7 @@ func (f *FileParser) typeSpecParser(parser *ParsingStage, ts *ast.TypeSpec, pare
 
 				// TYPE->FIELD reference: from_offset at the type name position.
 				// Membership, like TYPE->FUNCTION: it states nothing.
-				if addErr := f.index.AddReference(f.fileId, methodStart, methodFullName, typeNameStart, typeNameEnd, nil, index.NoRole, index.NoRelation); addErr != nil {
+				if addErr := f.index.AddReference(f.fileId, methodStart, methodFullName, typeNameStart, typeNameEnd, nil, index.NoRole); addErr != nil {
 					logging.Errorf("Failed to add TYPE->FIELD reference: %v", addErr)
 				}
 			}
@@ -936,7 +936,7 @@ func (f *FileParser) addPackageLevelDataRef(obj types.Object, ident *ast.Ident, 
 	defPos := f.pkg.Fset.Position(obj.Pos())
 	useStart := f.pkg.Fset.Position(ident.Pos())
 	useEnd := f.pkg.Fset.Position(ident.End())
-	return f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, roles, index.NoRelation)
+	return f.index.AddReference(f.fileId, defPos, fullName, useStart, useEnd, nil, roles)
 }
 
 // valueDeclParser extracts package-level variable or constant declarations as

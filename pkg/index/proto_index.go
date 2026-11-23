@@ -1,11 +1,13 @@
 package index
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"fmt"
 	"go/token"
 	"math"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -57,6 +59,8 @@ type referenceLog struct {
 	full     *Span
 	roles    Roles
 	relation Relation
+	// Where a relation was made so; unused for a reference.
+	at Place
 }
 
 // moduleImportLog tracks module-to-module import relationships
@@ -941,7 +945,40 @@ func (i *ProtoIndex) FindBuiltinInstance(name string) (FileId, token.Position, t
 	return FileId(-1), token.Position{}, token.Position{}, fmt.Errorf("builtin instance not found for %s", name)
 }
 
-func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position, full *Span, roles Roles, relation Relation) error {
+func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position, full *Span, roles Roles) error {
+	return i.addReferenceLog(referenceLog{
+		fromFile: from,
+		to:       to,
+		toName:   toName,
+		start:    start,
+		end:      end,
+		full:     full,
+		roles:    roles,
+		relation: NoRelation,
+	})
+}
+
+func (i *ProtoIndex) AddRelation(from FileId, to token.Position, toName string, start token.Position, end token.Position, relation Relation, at Place) error {
+	if relation == NoRelation {
+		return fmt.Errorf("a relation to '%s' at %s names no relation; a use is added with AddReference", toName, start)
+	}
+	if at.Start < 0 || at.End < at.Start {
+		return fmt.Errorf("a %s relation to '%s' is made so at an invalid place: file %d [%d, %d)",
+			relation, toName, at.File, at.Start, at.End)
+	}
+	return i.addReferenceLog(referenceLog{
+		fromFile: from,
+		to:       to,
+		toName:   toName,
+		start:    start,
+		end:      end,
+		relation: relation,
+		at:       at,
+	})
+}
+
+func (i *ProtoIndex) addReferenceLog(ref referenceLog) error {
+	from, to, toName, start, end := ref.fromFile, ref.to, ref.toName, ref.start, ref.end
 	// Reject start positions that are completely empty (zero-value struct).
 	// Positions with a filename but Line=0 are allowed — this occurs for
 	// compiler-provided packages like builtin/unsafe.
@@ -959,16 +996,7 @@ func (i *ProtoIndex) AddReference(from FileId, to token.Position, toName string,
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	i.referencesLog = append(i.referencesLog, referenceLog{
-		fromFile: from,
-		to:       to,
-		toName:   toName,
-		start:    start,
-		end:      end,
-		full:     full,
-		roles:    roles,
-		relation: relation,
-	})
+	i.referencesLog = append(i.referencesLog, ref)
 
 	return nil
 }
@@ -982,6 +1010,8 @@ func (i *ProtoIndex) ResolveReferences() error {
 	// the row the first one made.  Every role is a positive fact, so the union
 	// loses nothing and does not depend on which sighting came first.
 	seen := make(map[refDedupKey]*indexpb.SymbolRef)
+	// Every place each relation row was made so, as they were seen.
+	madeSo := make(map[*indexpb.SymbolRef][]witnessPlace)
 	for _, ref := range i.referencesLog {
 		key := fileNameKey{filePath: ref.to.Filename, name: ref.toName}
 		toSymbolID, ok := i.symbolByFileAndName[key]
@@ -1026,6 +1056,10 @@ func (i *ProtoIndex) ResolveReferences() error {
 					row.Relation = indexpb.RefRelation(ref.relation)
 				}
 			}
+			// The relation made so in one more place: one row still.
+			if ref.relation != NoRelation && Relation(row.Relation) == ref.relation {
+				madeSo[row] = append(madeSo[row], i.witnessPlace(ref.at))
+			}
 			continue
 		}
 
@@ -1039,11 +1073,79 @@ func (i *ProtoIndex) ResolveReferences() error {
 		}
 		seen[dedupKey] = row
 		file.Refs = append(file.Refs, row)
+		if ref.relation != NoRelation {
+			madeSo[row] = append(madeSo[row], i.witnessPlace(ref.at))
+		}
+	}
+
+	for row, places := range madeSo {
+		row.Witness = witnessOf(places)
 	}
 
 	i.referencesLog = nil
 
 	return nil
+}
+
+// witnessPlace is a Place as the witness orders and names it: by the path of
+// its object, which is what a reader sees and what does not change between
+// runs, where a file id is whatever order the parser's workers ran in.
+type witnessPlace struct {
+	path       string
+	object     int64
+	start, end int32
+	// False for a place the index cannot name: a file it does not hold, or
+	// offsets the wire format has no room for.
+	named bool
+}
+
+func (i *ProtoIndex) witnessPlace(at Place) witnessPlace {
+	object, ok := i.fileByID[int64(at.File)]
+	if !ok || !offsetsFitInt32(at.Start, at.End) {
+		return witnessPlace{}
+	}
+	return witnessPlace{
+		path:   object.FilesystemPath,
+		object: object.LocalId,
+		start:  int32(at.Start),
+		end:    int32(at.End),
+		named:  true,
+	}
+}
+
+// witnessOf is what a relation row says of where it happened.
+//
+// A RELATION NAMES THE FIRST PLACE THAT MADE IT SO, AND COUNTS THEM ALL.
+// First is first in file order: lowest object path, then lowest offset, then
+// the shorter of two expressions that start together.  That is a property of
+// the text, so the witness is the same whatever order the places were seen
+// in.  A place seen twice is one place.  A place the index cannot name is
+// neither the witness nor counted: `sites` is how many places a reader can be
+// shown, and a relation with none has no witness.
+func witnessOf(places []witnessPlace) *indexpb.Witness {
+	named := places[:0:0]
+	for _, place := range places {
+		if place.named {
+			named = append(named, place)
+		}
+	}
+	if len(named) == 0 {
+		return nil
+	}
+	slices.SortFunc(named, func(a, b witnessPlace) int {
+		return cmp.Or(
+			strings.Compare(a.path, b.path),
+			cmp.Compare(a.start, b.start),
+			cmp.Compare(a.end, b.end),
+		)
+	})
+	named = slices.Compact(named)
+	return &indexpb.Witness{
+		ObjectLocalId: named[0].object,
+		OffsetStart:   named[0].start,
+		OffsetEnd:     named[0].end,
+		Sites:         uint32(len(named)),
+	}
 }
 
 type refDedupKey struct {

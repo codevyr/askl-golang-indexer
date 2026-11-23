@@ -65,6 +65,21 @@ const (
 	RelationHolds = Relation(indexpb.RefRelation_REF_RELATION_HOLDS)
 )
 
+// Place is one stretch of text in a file of the project: where something
+// was written.
+//
+// A relation row sits on the declaration of its source, so its own range
+// says WHO is related.  The place says WHERE the code made it so: for an
+// interface method and a method that satisfies it, the expression of the
+// concrete type that was handed over where the interface was expected --
+// the right side of `r = &File{}`, an argument, a returned value.
+type Place struct {
+	File FileId
+	// Byte offsets in that file, half-open.
+	Start int
+	End   int
+}
+
 func (r Relation) String() string {
 	switch r {
 	case NoRelation:
