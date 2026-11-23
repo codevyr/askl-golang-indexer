@@ -81,7 +81,7 @@ func getMethodName(method *types.Func) string {
 	return methodName
 }
 
-func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter.Seq[*types.Func]) error {
+func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter.Seq[*types.Func], at index.Place) error {
 	// Extract method names from the both lhs and rhs methods
 	lhsMethodNames := []*types.Func{}
 	for lhsMethod := range lhsMethods {
@@ -130,7 +130,8 @@ func (f *AssignmentParser) createInterfaceReferences(lhsMethods, rhsMethods iter
 				// else -- so the row is a relation, written at the method's
 				// own name, which is inside the method's instance and inside
 				// nothing narrower: the row belongs to the method alone.
-				err = f.index.AddReference(fileId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethodName, start, end, nil, index.NoRole, index.RelationHolds)
+				// Where that assignment is, is `at` (placeOf).
+				err = f.index.AddRelation(fileId, f.pkg.Fset.Position(rhsMethod.Pos()), rhsMethodName, start, end, index.RelationHolds, at)
 				if err != nil {
 					return fmt.Errorf("failed to add reference: %w", err)
 				}
@@ -207,6 +208,32 @@ func (f *AssignmentParser) extractReturnType(returnExpr []ast.Expr, position, to
 	return rhsType, nil
 }
 
+// handedOver is the expression that stands where the interface is expected:
+// the one at `position`, or the single expression that yields all of them
+// (`r, err := open()`).  The caller has been through extractReturnType, which
+// refuses every other shape.
+func handedOver(exprs []ast.Expr, position, total int) ast.Expr {
+	if total > 1 && len(exprs) == 1 {
+		return exprs[0]
+	}
+	return exprs[position]
+}
+
+// placeOf is where an expression of this file is written.
+//
+// AN INTERFACE METHOD HOLDS A METHOD BECAUSE A VALUE OF THE METHOD'S TYPE WAS
+// HANDED OVER WHERE THE INTERFACE WAS EXPECTED, AND THAT EXPRESSION IS WHERE
+// IT HAPPENED.  Nothing in Go spells "T implements I"; what the code does
+// write is `r = &File{}`, `use(&File{})`, `return &File{}`, `var _ I =
+// (*T)(nil)`, and every holds row this parser writes comes from one of them.
+func (f *AssignmentParser) placeOf(expr ast.Expr) index.Place {
+	return index.Place{
+		File:  f.fileId,
+		Start: f.pkg.Fset.Position(expr.Pos()).Offset,
+		End:   f.pkg.Fset.Position(expr.End()).Offset,
+	}
+}
+
 func unwrapType(t types.Type) types.Type {
 	for {
 		switch actualType := t.(type) {
@@ -230,10 +257,11 @@ func (f *AssignmentParser) connectInterfaceToImplementation(lhs *types.Interface
 	}
 
 	rhsType = unwrapType(rhsType)
+	at := f.placeOf(handedOver(allRhs, lhsIdx, lhsLen))
 
 	switch rhsType := rhsType.(type) {
 	case *types.Named:
-		return f.createInterfaceReferences(lhs.Methods(), rhsType.Methods())
+		return f.createInterfaceReferences(lhs.Methods(), rhsType.Methods(), at)
 	case *types.Basic, *types.Struct, *types.Slice, *types.Array, *types.Map, *types.Chan:
 		return nil
 	case *types.Signature:
@@ -247,7 +275,7 @@ func (f *AssignmentParser) connectInterfaceToImplementation(lhs *types.Interface
 			return fmt.Errorf("left-hand side interface is nil, cannot connect to right-hand side interface")
 		}
 		// Create references between the methods of the left-hand side interface and the right-hand side interface
-		return f.createInterfaceReferences(lhs.Methods(), rhsType.Methods())
+		return f.createInterfaceReferences(lhs.Methods(), rhsType.Methods(), at)
 	default:
 		logging.Errorf("Right-hand side type is not a named type: %T", rhsType)
 		return fmt.Errorf("right-hand side type is not a named type: %T", rhsType)

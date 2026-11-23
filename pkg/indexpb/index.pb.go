@@ -914,7 +914,17 @@ type SymbolRef struct {
 	Roles uint32 `protobuf:"varint,11,opt,name=roles,proto3" json:"roles,omitempty"`
 	// Zero for a reference.  Otherwise this row is not something a token says
 	// but a fact between two symbols, placed on the declaration of its source.
-	Relation      RefRelation `protobuf:"varint,12,opt,name=relation,proto3,enum=askl.index.RefRelation" json:"relation,omitempty"`
+	Relation RefRelation `protobuf:"varint,12,opt,name=relation,proto3,enum=askl.index.RefRelation" json:"relation,omitempty"`
+	// Where a relation happened.  A relation row sits on the declaration of
+	// its source (the field's declaration, the macro's `#define`), so its own
+	// span says WHO is related, not where it was made so.  The witness names
+	// one place in the code that made it so: the store `.read = bt_bmc_read`,
+	// the invocation `DEFINE_MUTEX(lock)`, in Go the expression that hands a
+	// value over where the interface is expected (`return &Job{}`).  It is the
+	// first such place in file order (lowest object path, then lowest offset),
+	// with how many there are.  Absent on a reference, whose own span is where
+	// it happened, and on a relation with no place to name.
+	Witness       *Witness `protobuf:"bytes,13,opt,name=witness,proto3" json:"witness,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1005,6 +1015,82 @@ func (x *SymbolRef) GetRelation() RefRelation {
 	return RefRelation_REF_RELATION_NONE
 }
 
+func (x *SymbolRef) GetWitness() *Witness {
+	if x != nil {
+		return x.Witness
+	}
+	return nil
+}
+
+// One place in the code, in an object of the same project.
+type Witness struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ObjectLocalId int64                  `protobuf:"varint,1,opt,name=object_local_id,json=objectLocalId,proto3" json:"object_local_id,omitempty"` // References Object.local_id
+	OffsetStart   int32                  `protobuf:"varint,2,opt,name=offset_start,json=offsetStart,proto3" json:"offset_start,omitempty"`         // Byte offsets in that object, as SymbolRef.from_offset_*
+	OffsetEnd     int32                  `protobuf:"varint,3,opt,name=offset_end,json=offsetEnd,proto3" json:"offset_end,omitempty"`
+	Sites         uint32                 `protobuf:"varint,4,opt,name=sites,proto3" json:"sites,omitempty"` // How many places made this relation; this is the first.  At least 1.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Witness) Reset() {
+	*x = Witness{}
+	mi := &file_proto_index_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Witness) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Witness) ProtoMessage() {}
+
+func (x *Witness) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_index_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Witness.ProtoReflect.Descriptor instead.
+func (*Witness) Descriptor() ([]byte, []int) {
+	return file_proto_index_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *Witness) GetObjectLocalId() int64 {
+	if x != nil {
+		return x.ObjectLocalId
+	}
+	return 0
+}
+
+func (x *Witness) GetOffsetStart() int32 {
+	if x != nil {
+		return x.OffsetStart
+	}
+	return 0
+}
+
+func (x *Witness) GetOffsetEnd() int32 {
+	if x != nil {
+		return x.OffsetEnd
+	}
+	return 0
+}
+
+func (x *Witness) GetSites() uint32 {
+	if x != nil {
+		return x.Sites
+	}
+	return 0
+}
+
 var File_proto_index_proto protoreflect.FileDescriptor
 
 const file_proto_index_proto_rawDesc = "" +
@@ -1052,7 +1138,7 @@ const file_proto_index_proto_rawDesc = "" +
 	"\x04name\x18\b \x01(\v2\x10.askl.index.SpanR\x04name\x12.\n" +
 	"\tsignature\x18\t \x01(\v2\x10.askl.index.SpanR\tsignature\x12*\n" +
 	"\acontent\x18\n" +
-	" \x01(\v2\x10.askl.index.SpanR\acontentJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0f\"\xd7\x02\n" +
+	" \x01(\v2\x10.askl.index.SpanR\acontentJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0f\"\x86\x03\n" +
 	"\tSymbolRef\x12+\n" +
 	"\x12to_symbol_local_id\x18\x01 \x01(\x03R\x0ftoSymbolLocalId\x12*\n" +
 	"\x11from_offset_start\x18\x02 \x01(\x05R\x0ffromOffsetStart\x12&\n" +
@@ -1061,9 +1147,16 @@ const file_proto_index_proto_rawDesc = "" +
 	"\rnesting_level\x18\a \x01(\x05R\fnestingLevel\x12\x1b\n" +
 	"\tdfs_enter\x18\b \x01(\x03R\bdfsEnter\x12\x14\n" +
 	"\x05roles\x18\v \x01(\rR\x05roles\x123\n" +
-	"\brelation\x18\f \x01(\x0e2\x17.askl.index.RefRelationR\brelationJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\t\x10\n" +
+	"\brelation\x18\f \x01(\x0e2\x17.askl.index.RefRelationR\brelation\x12-\n" +
+	"\awitness\x18\r \x01(\v2\x13.askl.index.WitnessR\awitnessJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\t\x10\n" +
 	"J\x04\b\n" +
-	"\x10\v*]\n" +
+	"\x10\v\"\x89\x01\n" +
+	"\aWitness\x12&\n" +
+	"\x0fobject_local_id\x18\x01 \x01(\x03R\robjectLocalId\x12!\n" +
+	"\foffset_start\x18\x02 \x01(\x05R\voffsetStart\x12\x1d\n" +
+	"\n" +
+	"offset_end\x18\x03 \x01(\x05R\toffsetEnd\x12\x14\n" +
+	"\x05sites\x18\x04 \x01(\rR\x05sites*]\n" +
 	"\aRefRole\x12\x18\n" +
 	"\x14REF_ROLE_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rREF_ROLE_CALL\x10\x01\x12\x12\n" +
@@ -1120,7 +1213,7 @@ func file_proto_index_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_index_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_proto_index_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_proto_index_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_proto_index_proto_goTypes = []any{
 	(RefRole)(0),           // 0: askl.index.RefRole
 	(RefRelation)(0),       // 1: askl.index.RefRelation
@@ -1135,6 +1228,7 @@ var file_proto_index_proto_goTypes = []any{
 	(*Span)(nil),           // 10: askl.index.Span
 	(*SymbolInstance)(nil), // 11: askl.index.SymbolInstance
 	(*SymbolRef)(nil),      // 12: askl.index.SymbolRef
+	(*Witness)(nil),        // 13: askl.index.Witness
 }
 var file_proto_index_proto_depIdxs = []int32{
 	6,  // 0: askl.index.Project.objects:type_name -> askl.index.Object
@@ -1150,11 +1244,12 @@ var file_proto_index_proto_depIdxs = []int32{
 	10, // 10: askl.index.SymbolInstance.content:type_name -> askl.index.Span
 	10, // 11: askl.index.SymbolRef.full:type_name -> askl.index.Span
 	1,  // 12: askl.index.SymbolRef.relation:type_name -> askl.index.RefRelation
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	13, // 13: askl.index.SymbolRef.witness:type_name -> askl.index.Witness
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_proto_index_proto_init() }
@@ -1168,7 +1263,7 @@ func file_proto_index_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_index_proto_rawDesc), len(file_proto_index_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

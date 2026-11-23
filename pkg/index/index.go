@@ -178,9 +178,19 @@ type Index interface {
 	// decide what contains it.
 	//
 	// roles says what the token does to its target (NoRole: nothing is
-	// stated), and relation makes the row a fact between two symbols instead
-	// of a use (NoRelation: an ordinary reference).  See Roles and Relation.
-	AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position, full *Span, roles Roles, relation Relation) error
+	// stated).  See Roles.
+	AddReference(from FileId, to token.Position, toName string, start token.Position, end token.Position, full *Span, roles Roles) error
+
+	// AddRelation records a fact between two symbols that no token of the
+	// source spells.  start/end are a token INSIDE the source's own
+	// declaration, which is what makes the row the source's (see Relation);
+	// they say who is related.  `at` says where: the place in the code that
+	// made it so (see Place).
+	//
+	// A RELATION IS NEVER ADDED WITHOUT THE PLACE THAT MADE IT SO.  The same
+	// relation made so in several places is one row; the row names the first
+	// of them and counts them all.
+	AddRelation(from FileId, to token.Position, toName string, start token.Position, end token.Position, relation Relation, at Place) error
 	ResolveReferences() error
 	GetAllReferencesNames() ([]*ReferenceNames, error)
 
